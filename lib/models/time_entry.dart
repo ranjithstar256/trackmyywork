@@ -51,4 +51,24 @@ class TimeEntry {
   }
 
   bool get isActive => endTime == null;
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'activityId': activityId,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime?.toIso8601String(),
+      'note': note,
+    };
+  }
+
+  factory TimeEntry.fromJson(Map<String, dynamic> json) {
+    return TimeEntry(
+      id: json['id'],
+      activityId: json['activityId'],
+      startTime: DateTime.parse(json['startTime']),
+      endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
+      note: json['note'],
+    );
+  }
 }

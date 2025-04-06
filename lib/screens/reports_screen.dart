@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../services/time_tracking_service.dart';
+import '../models/activity.dart';
+import '../models/time_entry.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});

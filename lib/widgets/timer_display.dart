@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'dart:math' as math;
 
-class TimerDisplay extends StatelessWidget {
+class TimerDisplay extends StatefulWidget {
   final Duration elapsed;
   final String activityName;
 
@@ -12,10 +11,18 @@ class TimerDisplay extends StatelessWidget {
   });
 
   @override
+  State<TimerDisplay> createState() => _TimerDisplayState();
+}
+
+class _TimerDisplayState extends State<TimerDisplay> {
+  @override
   Widget build(BuildContext context) {
-    final hours = elapsed.inHours;
-    final minutes = (elapsed.inMinutes % 60).toString().padLeft(2, '0');
-    final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    final hours = widget.elapsed.inHours;
+    final minutes = (widget.elapsed.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (widget.elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    
+    // Debug print to verify updates
+    debugPrint('TimerDisplay rebuilding with elapsed: ${widget.elapsed.inSeconds} seconds');
     
     return Container(
       padding: const EdgeInsets.all(20),
@@ -60,7 +67,7 @@ class TimerDisplay extends StatelessWidget {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Currently tracking: $activityName',
+                  'Currently tracking: ${widget.activityName}',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -84,7 +91,7 @@ class TimerDisplay extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
-            value: (elapsed.inSeconds % 60) / 60,
+            value: (widget.elapsed.inSeconds % 60) / 60,
             backgroundColor: Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.1),
             valueColor: AlwaysStoppedAnimation<Color>(
               Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.5),

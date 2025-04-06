@@ -42,4 +42,24 @@ class Activity {
       isDefault: isDefault ?? this.isDefault,
     );
   }
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'color': color,
+      'icon': icon,
+      'isDefault': isDefault,
+    };
+  }
+
+  factory Activity.fromJson(Map<String, dynamic> json) {
+    return Activity(
+      id: json['id'],
+      name: json['name'],
+      color: json['color'],
+      icon: json['icon'],
+      isDefault: json['isDefault'] ?? false,
+    );
+  }
 }

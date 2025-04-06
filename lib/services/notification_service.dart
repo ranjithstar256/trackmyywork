@@ -1,60 +1,67 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  static const String channel = 'tm.ranjith.trackmywork/notification';
+  static const MethodChannel platform = MethodChannel(channel);
 
-  static const String activityTrackingChannelId = 'activity_tracking_channel';
-  static const String activityTrackingChannelName = 'Activity Tracking';
-  static const String activityTrackingChannelDescription = 'Shows currently tracked activity';
-  
+  // Use a single consistent ID for all activity tracking notifications
   static const int activityNotificationId = 1;
 
-  Future<void> init() async {
-    tz_data.initializeTimeZones();
-    
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    
-    final IOSInitializationSettings initializationSettingsIOS =
-        IOSInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-      onDidReceiveLocalNotification: (int id, String? title, String? body, String? payload) async {},
-    );
-    
-    final InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-    );
-    
-    await flutterLocalNotificationsPlugin.initialize(
-      initializationSettings,
-      onSelectNotification: (String? payload) async {
-        // Handle notification tap
-      },
-    );
+  // Track whether notification has been shown
+  bool _notificationActive = false;
 
-    // Create notification channel for Android
-    if (Platform.isAndroid) {
-      await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(const AndroidNotificationChannel(
-            activityTrackingChannelId,
-            activityTrackingChannelName,
-            description: activityTrackingChannelDescription,
-            importance: Importance.high,
-          ));
+  // Store last notification content to avoid duplicate updates
+  String? _lastNotificationTitle;
+  String? _lastNotificationBody;
+  DateTime _lastNotificationUpdateTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Minimum time between notification updates (in seconds)
+  static const int minUpdateIntervalSeconds = 5;
+
+  Future<void> init() async {
+    debugPrint('Notification service initialized');
+    // Request notification permissions
+    await requestNotificationPermissions();
+  }
+
+  Future<void> requestNotificationPermissions() async {
+    if (!Platform.isAndroid) {
+      debugPrint('Notification permissions only handled on Android for now');
+      return;
+    }
+
+    try {
+      final result = await platform.invokeMethod('requestNotificationPermissions');
+      debugPrint('Notification permissions result: $result');
+
+      // Store that we've requested permissions
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('hasRequestedNotificationPermissions', true);
+    } on PlatformException catch (e) {
+      debugPrint('Failed to request notification permissions: ${e.message}');
+    }
+  }
+
+  Future<bool> areNotificationsEnabled() async {
+    if (!Platform.isAndroid) {
+      // Default to true for platforms other than Android for now
+      return true;
+    }
+
+    try {
+      final bool enabled = await platform.invokeMethod('areNotificationsEnabled') ?? false;
+      debugPrint('Notifications enabled: $enabled');
+      return enabled;
+    } on PlatformException catch (e) {
+      debugPrint('Failed to check if notifications are enabled: ${e.message}');
+      return false;
     }
   }
 
@@ -63,112 +70,183 @@ class NotificationService {
     required String activityIcon,
     required Duration elapsed,
   }) async {
+    if (!Platform.isAndroid) {
+      // Skip notifications on non-Android platforms for now
+      return;
+    }
+
+    // Check if notifications are enabled
+    final bool notificationsEnabled = await areNotificationsEnabled();
+    if (!notificationsEnabled) {
+      debugPrint('Notifications are disabled. Skipping notification.');
+      return;
+    }
+
     // Format the elapsed time
-    final hours = elapsed.inHours;
-    final minutes = elapsed.inMinutes.remainder(60);
-    final seconds = elapsed.inSeconds.remainder(60);
-    final formattedTime = 
-        '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    
-    // Get the icon resource for the notification
-    final IconData iconData = _getIconData(activityIcon);
-    String iconName = 'access_time';
-    
-    // Map the icon to a system icon name
-    if (iconData == Icons.work) iconName = 'work';
-    else if (iconData == Icons.computer) iconName = 'computer';
-    else if (iconData == Icons.school) iconName = 'school';
-    else if (iconData == Icons.fitness_center) iconName = 'fitness_center';
-    else if (iconData == Icons.book) iconName = 'book';
-    else if (iconData == Icons.movie) iconName = 'movie';
-    else if (iconData == Icons.music_note) iconName = 'music_note';
-    else if (iconData == Icons.restaurant) iconName = 'restaurant';
-    else if (iconData == Icons.shopping_cart) iconName = 'shopping_cart';
-    else if (iconData == Icons.flight) iconName = 'flight';
-    else if (iconData == Icons.home) iconName = 'home';
-    else if (iconData == Icons.brush) iconName = 'brush';
-    else if (iconData == Icons.code) iconName = 'code';
-    else if (iconData == Icons.sports) iconName = 'sports';
-    else if (iconData == Icons.sports_esports) iconName = 'sports_esports';
-    
-    final AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
-      activityTrackingChannelId,
-      activityTrackingChannelName,
-      channelDescription: activityTrackingChannelDescription,
-      importance: Importance.high,
-      priority: Priority.high,
-      ongoing: true,
-      autoCancel: false,
-      category: 'service',
-      actions: <AndroidNotificationAction>[
-        const AndroidNotificationAction(
-          'stop',
-          'Stop',
-          icon: DrawableResourceAndroidBitmap('ic_stop'),
-        ),
-      ],
-    );
-    
-    final IOSNotificationDetails iOSPlatformChannelSpecifics =
-        IOSNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: false,
-    );
-    
-    final NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: iOSPlatformChannelSpecifics,
-    );
-    
-    await flutterLocalNotificationsPlugin.show(
-      activityNotificationId,
-      'TrackMyWork',
-      'Currently tracking: $activityName ($formattedTime)',
-      platformChannelSpecifics,
-      payload: 'activity_tracking',
-    );
+    final formattedTime = _formatElapsedTime(elapsed);
+    final title = 'TrackMyWork';
+    final body = 'Currently tracking: $activityName ($formattedTime)';
+
+    try {
+      debugPrint('Creating initial notification: $activityName, $formattedTime');
+      await platform.invokeMethod('showNotification', {
+        'id': activityNotificationId,
+        'title': title,
+        'body': body,
+        'iconName': _getIconName(activityIcon),
+        'ongoing': true,
+      });
+
+      // Store notification content to avoid duplicate updates
+      _lastNotificationTitle = title;
+      _lastNotificationBody = body;
+      _lastNotificationUpdateTime = DateTime.now();
+
+      // Mark notification as active
+      _notificationActive = true;
+    } on PlatformException catch (e) {
+      debugPrint('Failed to show notification: ${e.message}');
+    }
+  }
+
+  Future<void> updateNotificationContent({
+    required String activityName,
+    required String activityIcon,
+    required Duration elapsed,
+  }) async {
+    if (!Platform.isAndroid) {
+      // Skip notifications on non-Android platforms for now
+      return;
+    }
+
+    // Check if notifications are enabled and active
+    if (!_notificationActive) {
+      debugPrint('No active notification to update. Creating new notification.');
+      return showActivityTrackingNotification(
+        activityName: activityName,
+        activityIcon: activityIcon,
+        elapsed: elapsed,
+      );
+    }
+
+    final bool notificationsEnabled = await areNotificationsEnabled();
+    if (!notificationsEnabled) {
+      debugPrint('Notifications are disabled. Skipping update.');
+      return;
+    }
+
+    // Format the elapsed time
+    final formattedTime = _formatElapsedTime(elapsed);
+    final title = 'TrackMyWork';
+    final body = 'Currently tracking: $activityName ($formattedTime)';
+
+    // Check if content actually changed and if enough time has passed since last update
+    final now = DateTime.now();
+    final timeSinceLastUpdate = now.difference(_lastNotificationUpdateTime).inSeconds;
+
+    if (body == _lastNotificationBody && title == _lastNotificationTitle) {
+      // No change in content, skip update to reduce overhead
+      return;
+    }
+
+    if (timeSinceLastUpdate < minUpdateIntervalSeconds) {
+      // Too soon to update again, skip to reduce overhead
+      // But still update our cached values for next comparison
+      _lastNotificationTitle = title;
+      _lastNotificationBody = body;
+      return;
+    }
+
+    try {
+      debugPrint('Updating notification: $activityName, $formattedTime');
+      await platform.invokeMethod('updateNotificationContent', {
+        'id': activityNotificationId,
+        'title': title,
+        'body': body,
+        'iconName': _getIconName(activityIcon),
+      });
+
+      // Update stored values
+      _lastNotificationTitle = title;
+      _lastNotificationBody = body;
+      _lastNotificationUpdateTime = now;
+    } on PlatformException catch (e) {
+      debugPrint('Failed to update notification content: ${e.message}');
+    }
   }
 
   Future<void> cancelActivityTrackingNotification() async {
-    await flutterLocalNotificationsPlugin.cancel(activityNotificationId);
+    if (!Platform.isAndroid) {
+      // Skip for non-Android platforms
+      return;
+    }
+
+    if (!_notificationActive) {
+      // No notification to cancel
+      return;
+    }
+
+    try {
+      debugPrint('Canceling notification');
+      await platform.invokeMethod('cancelNotification', {
+        'id': activityNotificationId,
+      });
+
+      // Reset stored values
+      _lastNotificationTitle = null;
+      _lastNotificationBody = null;
+
+      // Mark notification as inactive
+      _notificationActive = false;
+    } on PlatformException catch (e) {
+      debugPrint('Failed to cancel notification: ${e.message}');
+    }
   }
 
-  IconData _getIconData(String iconName) {
+  // Helper method to format elapsed time consistently
+  String _formatElapsedTime(Duration elapsed) {
+    final hours = elapsed.inHours;
+    final minutes = elapsed.inMinutes.remainder(60);
+    final seconds = elapsed.inSeconds.remainder(60);
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  // Convert Flutter icon names to native icon names
+  String _getIconName(String iconName) {
+    // This mapping can be extended based on your available native icons
     switch (iconName) {
       case 'work':
-        return Icons.work;
+        return 'work';
       case 'computer':
-        return Icons.computer;
+        return 'computer';
       case 'school':
-        return Icons.school;
+        return 'school';
       case 'fitness':
-        return Icons.fitness_center;
+        return 'fitness';
       case 'book':
-        return Icons.book;
+        return 'book';
       case 'movie':
-        return Icons.movie;
+        return 'movie';
       case 'music':
-        return Icons.music_note;
+        return 'music';
       case 'food':
-        return Icons.restaurant;
+        return 'food';
       case 'shopping':
-        return Icons.shopping_cart;
+        return 'shopping';
       case 'travel':
-        return Icons.flight;
+        return 'travel';
       case 'home':
-        return Icons.home;
+        return 'home';
       case 'brush':
-        return Icons.brush;
+        return 'brush';
       case 'code':
-        return Icons.code;
+        return 'code';
       case 'sports':
-        return Icons.sports;
+        return 'sports';
       case 'game':
-        return Icons.sports_esports;
+        return 'game';
       default:
-        return Icons.access_time;
+        return 'access_time';
     }
   }
 }

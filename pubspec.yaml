@@ -31,8 +31,8 @@ dependencies:
   flutter:
     sdk: flutter
   provider: ^6.0.5
-  shared_preferences: ^2.2.2
   fl_chart: 0.66.2
+  shared_preferences: any
   intl: ^0.19.0
   google_fonts: ^6.1.0
   uuid: ^4.2.2
@@ -42,6 +42,8 @@ dependencies:
   firebase_analytics: ^10.7.4
   firebase_auth: ^4.15.3
   cloud_firestore: ^4.13.6
+  flutter_local_notifications: ^17.2.1
+  device_info_plus: ^9.1.2
   
   # Reduce APK size by using optimized packages
   flutter_displaymode: ^0.6.0  # Helps with display refresh rate
@@ -49,9 +51,15 @@ dependencies:
   
   # App introduction slider
   introduction_screen: ^3.1.12
+  
+  # Explicitly specify webview_flutter version
+  webview_flutter: 4.4.2
 
-# Force specific versions of plugins to ensure compatibility
+# Add dependency overrides to fix compatibility issues
 dependency_overrides:
+  webview_flutter_android: 3.9.5
+  in_app_purchase_android: 0.3.0+13
+  path_provider_android: 2.1.0
   shared_preferences_android: 2.1.0
 
 dev_dependencies:

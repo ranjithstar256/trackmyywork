@@ -63,16 +63,6 @@ class SettingsScreen extends StatelessWidget {
           // App settings
           _buildSectionHeader(context, 'App Settings'),
           
-          // Notifications
-          ListTile(
-            title: const Text('Notifications'),
-            subtitle: const Text('Manage notification settings'),
-            leading: const Icon(Icons.notifications),
-            onTap: () {
-              _showNotificationSettingsDialog(context);
-            },
-          ),
-          
           // Data management
           ListTile(
             title: const Text('Data Management'),
@@ -85,7 +75,7 @@ class SettingsScreen extends StatelessWidget {
           
           const Divider(),
           
-          // About
+     /*     // About
           _buildSectionHeader(context, 'About'),
           
           // App info
@@ -111,7 +101,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () {
               // Show terms of service
             },
-          ),
+          ),*/
         ],
       ),
     );
@@ -305,80 +295,6 @@ class SettingsScreen extends StatelessWidget {
     );
   }
   
-  void _showNotificationSettingsDialog(BuildContext context) {
-    // Use SharedPreferences to store notification settings
-    bool reminderNotifications = true;
-    bool activityNotifications = true;
-    bool goalNotifications = true;
-    
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Notification Settings'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SwitchListTile(
-                  title: const Text('Activity Reminders'),
-                  subtitle: const Text('Remind you of scheduled activities'),
-                  value: reminderNotifications,
-                  onChanged: (value) {
-                    setState(() {
-                      reminderNotifications = value;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  title: const Text('Activity Summaries'),
-                  subtitle: const Text('Daily and weekly activity summaries'),
-                  value: activityNotifications,
-                  onChanged: (value) {
-                    setState(() {
-                      activityNotifications = value;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  title: const Text('Goal Notifications'),
-                  subtitle: const Text('Alerts when you reach activity goals'),
-                  value: goalNotifications,
-                  onChanged: (value) {
-                    setState(() {
-                      goalNotifications = value;
-                    });
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  // Save notification settings
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Notification settings saved'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                  Navigator.pop(context);
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   void _showDataManagementDialog(BuildContext context) {
     showDialog(
       context: context,

@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../services/background_service.dart';
 import '../services/time_tracking_service.dart';
+import '../models/activity.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 
-class ActivityButton extends StatelessWidget {
+class ActivityButton extends StatefulWidget {
   final Activity activity;
   final VoidCallback onPressed;
 
@@ -14,15 +18,66 @@ class ActivityButton extends StatelessWidget {
   });
 
   @override
+  State<ActivityButton> createState() => _ActivityButtonState();
+}
+
+class _ActivityButtonState extends State<ActivityButton> {
+  Timer? _updateTimer;
+  
+  @override
+  void initState() {
+    super.initState();
+    // Set up a timer to refresh the widget every second if it's the active activity
+    _setupUpdateTimer();
+  }
+  
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+  
+  void _setupUpdateTimer() {
+    // Cancel any existing timer
+    _updateTimer?.cancel();
+    
+    // Create a new timer that updates every second
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+      final isActive = timeTrackingService.isTracking && 
+                      timeTrackingService.currentActivityId == widget.activity.id;
+      
+      // Only trigger a rebuild if this is the active activity
+      if (isActive && mounted) {
+        setState(() {
+          // This empty setState will trigger a rebuild with the latest time
+        });
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Get the time tracking service to calculate total time spent today
     final timeTrackingService = Provider.of<TimeTrackingService>(context);
     final todayDurations = timeTrackingService.getActivityDurationsForDay(DateTime.now());
-    Duration activityDuration = todayDurations[activity.id] ?? Duration.zero;
     
     // Check if this activity is currently active
     final bool isActive = timeTrackingService.isTracking && 
-                         timeTrackingService.currentActivityId == activity.id;
+                         timeTrackingService.currentActivityId == widget.activity.id;
+    
+    // Get the total duration directly from the time tracking service
+    // This already includes both completed durations and current active duration if applicable
+    Duration activityDuration = todayDurations[widget.activity.id] ?? Duration.zero;
+    
+    // Debug print to verify we're using the correct duration
+    if (isActive) {
+      final activeEntry = timeTrackingService.getActiveTimeEntry();
+      if (activeEntry != null) {
+        final currentDuration = DateTime.now().difference(activeEntry.startTime);
+        debugPrint('ActivityButton: ${widget.activity.name} - Using service duration: ${activityDuration.inSeconds}s (current active: ${currentDuration.inSeconds}s)');
+      }
+    }
     
     // Calculate elapsed time if this is the active activity
     String elapsedTimeText = '';
@@ -40,23 +95,23 @@ class ActivityButton extends StatelessWidget {
     
     return GestureDetector(
       onLongPress: () {
-        if (!activity.isDefault) {
+        if (!widget.activity.isDefault) {
           _showActivityOptions(context);
         }
       },
       child: ElevatedButton(
-        onPressed: onPressed,
+        onPressed: widget.onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: isActive 
-              ? Color(int.parse(activity.color)).withOpacity(0.8)
+              ? Color(int.parse(widget.activity.color)).withOpacity(0.8)
               : Theme.of(context).colorScheme.surface,
           foregroundColor: isActive 
               ? Theme.of(context).colorScheme.onPrimary
-              : Color(int.parse(activity.color)),
+              : Color(int.parse(widget.activity.color)),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(
-              color: Color(int.parse(activity.color)),
+              color: Color(int.parse(widget.activity.color)),
               width: 2,
             ),
           ),
@@ -70,12 +125,12 @@ class ActivityButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                _getIconData(activity.icon),
+                _getIconData(widget.activity.icon),
                 size: 28,
               ),
               const SizedBox(height: 4),
               Text(
-                activity.name,
+                widget.activity.name,
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -104,7 +159,7 @@ class ActivityButton extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: isActive 
                                 ? Theme.of(context).colorScheme.onPrimary.withOpacity(0.2)
-                                : Color(int.parse(activity.color)).withOpacity(0.15),
+                                : Color(int.parse(widget.activity.color)).withOpacity(0.15),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -114,7 +169,7 @@ class ActivityButton extends StatelessWidget {
                               fontWeight: FontWeight.w500,
                               color: isActive 
                                   ? Theme.of(context).colorScheme.onPrimary
-                                  : Color(int.parse(activity.color)),
+                                  : Color(int.parse(widget.activity.color)),
                             ),
                           ),
                         ),
@@ -127,7 +182,7 @@ class ActivityButton extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Color(int.parse(activity.color)).withOpacity(0.15),
+                      color: Color(int.parse(widget.activity.color)).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -135,7 +190,7 @@ class ActivityButton extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w500,
-                        color: Color(int.parse(activity.color)),
+                        color: Color(int.parse(widget.activity.color)),
                       ),
                     ),
                   ),
@@ -183,14 +238,14 @@ class ActivityButton extends StatelessWidget {
             ),
             ListTile(
               leading: CircleAvatar(
-                backgroundColor: Color(int.parse(activity.color)).withOpacity(0.2),
+                backgroundColor: Color(int.parse(widget.activity.color)).withOpacity(0.2),
                 child: Icon(
-                  _getIconData(activity.icon),
-                  color: Color(int.parse(activity.color)),
+                  _getIconData(widget.activity.icon),
+                  color: Color(int.parse(widget.activity.color)),
                 ),
               ),
               title: Text(
-                activity.name,
+                widget.activity.name,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: const Text('Activity options'),
@@ -208,7 +263,7 @@ class ActivityButton extends StatelessWidget {
                 Navigator.pushNamed(
                   context,
                   '/add_activity',
-                  arguments: activity,
+                  arguments: widget.activity,
                 );
               },
             ),
@@ -223,7 +278,7 @@ class ActivityButton extends StatelessWidget {
                 // Show confirmation dialog
                 final confirmed = await _showDeleteConfirmationDialog(context);
                 if (confirmed == true) {
-                  final result = await timeTrackingService.deleteActivity(activity.id);
+                  final result = await timeTrackingService.deleteActivity(widget.activity.id);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(result['message']),
@@ -251,7 +306,7 @@ class ActivityButton extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Activity'),
-        content: Text('Are you sure you want to delete "${activity.name}"? This will also delete all time entries associated with this activity.'),
+        content: Text('Are you sure you want to delete "${widget.activity.name}"? This will also delete all time entries associated with this activity.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

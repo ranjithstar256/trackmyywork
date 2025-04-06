@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/time_tracking_service.dart';
-import '../services/ad_service.dart';
-import '../services/premium_features_service.dart';
 import '../services/background_service.dart';
 import '../widgets/activity_button.dart';
 import '../widgets/timer_display.dart';
 import '../widgets/active_activity_banner.dart';
+import '../models/activity.dart';
+import '../models/time_entry.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _setupElapsedTimeListener();
     _checkForActiveActivity();
-    
+
     // Set system UI overlay style for better integration with the app design
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -38,7 +38,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       systemNavigationBarColor: Colors.white,
       systemNavigationBarIconBrightness: Brightness.dark,
     ));
-    
+
     // Show the long-press hint after a short delay
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowLongPressHint();
@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     if (state == AppLifecycleState.resumed) {
       // When app is resumed, refresh the timer state
       _checkForActiveActivity();
@@ -67,19 +67,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _setupElapsedTimeListener() {
     // Cancel any existing subscription to avoid duplicates
     _elapsedSubscription?.cancel();
-    
-    _elapsedSubscription = BackgroundService.elapsedStream.listen((duration) {
+
+    _elapsedSubscription = BackgroundService().elapsedStream.listen((duration) {
       if (mounted) {
         setState(() {
           _elapsed = duration;
         });
-        debugPrint('HomeScreen received elapsed time update: ${_elapsed.inSeconds} seconds');
+        debugPrint(
+            'HomeScreen received elapsed time update: ${_elapsed.inSeconds} seconds');
       }
+    });
+    
+    // Immediately check for active activity to get the current elapsed time
+    _checkForActiveActivity();
+    
+    // Also set up a periodic timer to update the elapsed time every second
+    // This ensures the timer updates even if the stream doesn't emit frequently enough
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      _checkForActiveActivity();
     });
   }
 
   Future<void> _checkForActiveActivity() async {
-    final activeDetails = await BackgroundService.getActiveActivityDetails();
+    final activeDetails = await BackgroundService().getActiveActivityDetails();
     if (activeDetails != null) {
       if (mounted) {
         setState(() {
@@ -95,9 +110,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _showActivitySelectionDialog(BuildContext context, TimeTrackingService timeTrackingService) {
+  void _showActivitySelectionDialog(
+      BuildContext context, TimeTrackingService timeTrackingService) {
     final activities = timeTrackingService.activities;
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -126,7 +142,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -228,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _showHintOverlay() {
     // Remove any existing overlay
     _removeOverlay();
-    
+
     // Create a new overlay
     _overlayEntry = OverlayEntry(
       builder: (context) {
@@ -243,7 +260,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   right: 0,
                   child: Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 16),
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(16),
@@ -290,10 +308,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
-    
+
     // Insert the overlay
     Overlay.of(context).insert(_overlayEntry!);
-    
+
     // Add a tap handler to remove the overlay when tapped
     GestureDetector(
       onTap: _removeOverlay,
@@ -308,7 +326,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _formatDuration(Duration duration) {
-    return BackgroundService.formatDuration(duration);
+    return BackgroundService().formatDuration(duration);
   }
 
   @override
@@ -337,7 +355,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -411,41 +430,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final activities = timeTrackingService.activities;
           final isTracking = timeTrackingService.isTracking;
           final currentActivityId = timeTrackingService.currentActivityId;
-          
+
           return Column(
             children: [
-              // Active activity banner - always visible at the top when tracking
-              if (isTracking && currentActivityId != null)
-                ActiveActivityBanner(
-                  activityName: activities.firstWhere(
-                    (a) => a.id == currentActivityId,
-                    orElse: () => Activity(
-                      id: '',
-                      name: 'Unknown Activity',
-                      color: '0xFF4CAF50',
-                      icon: 'work',
-                    ),
-                  ).name,
-                  activityIcon: activities.firstWhere(
-                    (a) => a.id == currentActivityId,
-                    orElse: () => Activity(
-                      id: '',
-                      name: 'Unknown Activity',
-                      color: '0xFF4CAF50',
-                      icon: 'work',
-                    ),
-                  ).icon,
-                  elapsed: _elapsed,
-                  onStop: () {
-                    timeTrackingService.stopCurrentActivity();
-                  },
-                ),
-              
               // Timer display
               if (isTracking)
                 Column(
                   children: [
-                    // Existing timer display
                     Container(
                       margin: const EdgeInsets.fromLTRB(20, 16, 20, 16),
                       padding: const EdgeInsets.all(20),
@@ -455,15 +446,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           end: Alignment.bottomRight,
                           colors: [
                             Theme.of(context).colorScheme.primaryContainer,
-                            Theme.of(context).colorScheme.primaryContainer.withBlue(
-                                (Theme.of(context).colorScheme.primaryContainer.blue + 15).clamp(0, 255)
-                            ),
+                            Theme.of(context)
+                                .colorScheme
+                                .primaryContainer
+                                .withBlue((Theme.of(context)
+                                            .colorScheme
+                                            .primaryContainer
+                                            .blue +
+                                        15)
+                                    .clamp(0, 255)),
                           ],
                         ),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withOpacity(0.2),
                             blurRadius: 15,
                             offset: const Offset(0, 6),
                             spreadRadius: -2,
@@ -476,34 +476,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                _getIconData(activities.firstWhere(
-                                  (a) => a.id == currentActivityId,
-                                  orElse: () => Activity(
-                                    id: '',
-                                    name: 'Unknown Activity',
-                                    color: '0xFF4CAF50',
-                                    icon: 'work',
-                                  ),
-                                ).icon),
-                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                _getIconData(activities
+                                    .firstWhere(
+                                      (a) => a.id == currentActivityId,
+                                      orElse: () => Activity(
+                                        id: '',
+                                        name: 'Unknown Activity',
+                                        color: '0xFF4CAF50',
+                                        icon: 'work',
+                                      ),
+                                    )
+                                    .icon),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onPrimaryContainer,
                                 size: 20,
                               ),
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
                                   'Currently tracking: ${activities.firstWhere(
-                                    (a) => a.id == currentActivityId,
-                                    orElse: () => Activity(
-                                      id: '',
-                                      name: 'Unknown Activity',
-                                      color: '0xFF4CAF50',
-                                      icon: 'work',
-                                    ),
-                                  ).name}',
+                                        (a) => a.id == currentActivityId,
+                                        orElse: () => Activity(
+                                          id: '',
+                                          name: 'Unknown Activity',
+                                          color: '0xFF4CAF50',
+                                          icon: 'work',
+                                        ),
+                                      ).name}',
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
-                                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onPrimaryContainer,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -513,15 +519,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           const SizedBox(height: 16),
                           TimerDisplay(
                             elapsed: _elapsed,
-                            activityName: activities.firstWhere(
-                              (a) => a.id == currentActivityId,
-                              orElse: () => Activity(
-                                id: '',
-                                name: 'Unknown Activity',
-                                color: '0xFF4CAF50',
-                                icon: 'work',
-                              ),
-                            ).name,
+                            activityName: activities
+                                .firstWhere(
+                                  (a) => a.id == currentActivityId,
+                                  orElse: () => Activity(
+                                    id: '',
+                                    name: 'Unknown Activity',
+                                    color: '0xFF4CAF50',
+                                    icon: 'work',
+                                  ),
+                                )
+                                .name,
                           ),
                         ],
                       ),
@@ -533,12 +541,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (!isTracking)
                 Container(
                   margin: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.7),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.7),
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.15),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outline
+                          .withOpacity(0.15),
                       width: 1.5,
                     ),
                     boxShadow: [
@@ -554,7 +569,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .secondary
+                              .withOpacity(0.15),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -577,7 +595,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         'Tap an activity below or the start button',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant
+                              .withOpacity(0.7),
                         ),
                       ),
                     ],
@@ -594,7 +615,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
@@ -620,7 +644,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           '${activities.length} items',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onBackground
+                                .withOpacity(0.6),
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -629,7 +656,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Icon(
                             Icons.info_outline,
                             size: 16,
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withOpacity(0.7),
                           ),
                         ),
                       ],
@@ -657,7 +687,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       return ActivityButton(
                         activity: activity,
                         onPressed: () {
-                          if (timeTrackingService.currentActivityId == activity.id) {
+                          if (timeTrackingService.currentActivityId ==
+                              activity.id) {
                             timeTrackingService.stopCurrentActivity();
                           } else {
                             timeTrackingService.startActivity(activity.id);
@@ -681,8 +712,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: (isTracking
-                  ? Theme.of(context).colorScheme.errorContainer
-                  : Theme.of(context).colorScheme.secondaryContainer).withOpacity(0.3),
+                      ? Theme.of(context).colorScheme.errorContainer
+                      : Theme.of(context).colorScheme.secondaryContainer)
+                  .withOpacity(0.3),
               borderRadius: BorderRadius.circular(20),
             ),
             child: FloatingActionButton.extended(
@@ -722,7 +754,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ? Theme.of(context).colorScheme.onError
                   : Theme.of(context).colorScheme.onSecondaryContainer,
               elevation: 0,
-              extendedPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              extendedPadding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
               ),
@@ -740,9 +773,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Wait for the UI to be fully built
       await Future.delayed(const Duration(seconds: 2));
       _showHintOverlay();
-      
+
       // Auto-dismiss after some time
-      Future.delayed(const Duration(seconds: 5), () {
+      Future.delayed(const Duration(seconds: 3), () {
         _removeOverlay();
       });
     }
