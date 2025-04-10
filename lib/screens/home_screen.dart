@@ -80,34 +80,72 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    debugPrint('HomeScreen: Disposing resources');
     WidgetsBinding.instance.removeObserver(this);
-    _elapsedSubscription?.cancel();
+    
+    // Safely cancel subscription with error handling
+    if (_elapsedSubscription != null) {
+      _elapsedSubscription!.cancel().catchError((e) {
+        debugPrint('Error cancelling elapsed subscription: $e');
+      });
+      _elapsedSubscription = null;
+    }
+    
+    // Cancel periodic timer
+    if (_periodicTimer != null) {
+      _periodicTimer!.cancel();
+      _periodicTimer = null;
+    }
+    
+    // Remove overlay if present
     _removeOverlay();
+    
+    debugPrint('HomeScreen: Resources disposed successfully');
     super.dispose();
   }
 
+  // Timer for periodic updates
+  Timer? _periodicTimer;
+  
   void _setupElapsedTimeListener() {
     // Cancel any existing subscription to avoid duplicates
-    _elapsedSubscription?.cancel();
+    if (_elapsedSubscription != null) {
+      _elapsedSubscription!.cancel();
+      _elapsedSubscription = null;
+    }
+    
+    // Cancel any existing periodic timer
+    _periodicTimer?.cancel();
 
-    _elapsedSubscription = BackgroundService().elapsedStream.listen((duration) {
-      if (mounted) {
-        setState(() {
-          _elapsed = duration;
-        });
-        debugPrint(
-            'HomeScreen received elapsed time update: ${_elapsed.inSeconds} seconds');
-      }
-    });
+    // Set up new subscription with error handling
+    _elapsedSubscription = BackgroundService().elapsedStream.listen(
+      (duration) {
+        if (mounted) {
+          setState(() {
+            _elapsed = duration;
+          });
+          debugPrint(
+              'HomeScreen received elapsed time update: ${_elapsed.inSeconds} seconds');
+        }
+      },
+      onError: (error) {
+        debugPrint('Error in elapsed time stream: $error');
+        // Try to recover by checking for active activity
+        if (mounted) {
+          _checkForActiveActivity();
+        }
+      },
+    );
     
     // Immediately check for active activity to get the current elapsed time
     _checkForActiveActivity();
     
     // Also set up a periodic timer to update the elapsed time every second
     // This ensures the timer updates even if the stream doesn't emit frequently enough
-    Timer.periodic(const Duration(seconds: 1), (timer) {
+    _periodicTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
+        _periodicTimer = null;
         return;
       }
       

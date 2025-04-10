@@ -33,6 +33,33 @@ Future<void> reportError(dynamic error, dynamic stackTrace) async {
 // Global navigator key for accessing context from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// App lifecycle observer to manage resources properly
+class _AppLifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint('App lifecycle state changed to: $state');
+    
+    // Get the time tracking service if available
+    try {
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+        timeTrackingService.handleAppLifecycleChange(state);
+      }
+    } catch (e) {
+      debugPrint('Error handling lifecycle change: $e');
+    }
+    
+    // Handle app termination
+    if (state == AppLifecycleState.detached) {
+      debugPrint('App is being terminated, disposing resources');
+      BackgroundService().dispose().catchError((e) {
+        debugPrint('Error disposing background service: $e');
+      });
+    }
+  }
+}
+
 void main() async {
   // Catch any errors that occur during initialization
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +72,9 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase initialization error: $e');
   }
+  
+  // Register a callback for app lifecycle state changes
+  WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
 
   // Set up error handling
   FlutterError.onError = (FlutterErrorDetails details) {
