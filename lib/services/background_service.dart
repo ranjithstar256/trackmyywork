@@ -138,7 +138,7 @@ class BackgroundService {
   Future<void> startTimer(
       String activityId, String activityName, String activityIcon) async {
     debugPrint('BackgroundService: Starting timer for activity: $activityId');
-    
+
     try {
       // Store active activity details
       _activeActivityId = activityId;
@@ -166,7 +166,7 @@ class BackgroundService {
         });
         _uiUpdateSubscription = null;
       }
-      
+
       if (_notificationUpdateSubscription != null) {
         await _notificationUpdateSubscription!.cancel().catchError((e) {
           debugPrint('Error cancelling notification update subscription: $e');
@@ -225,7 +225,7 @@ class BackgroundService {
         debugPrint('Error storing activity details in SharedPreferences: $e');
         // Continue even if SharedPreferences fails, as we have in-memory state
       }
-      
+
       debugPrint('BackgroundService: Timer started successfully');
     } catch (e) {
       debugPrint('Error starting timer: $e');
@@ -240,7 +240,7 @@ class BackgroundService {
     // Use a lock to prevent concurrent modifications
     final stopLock = Completer<void>();
     SharedPreferences? prefs;
-    
+
     try {
       // Cancel timer first to prevent any new events
       _timer?.cancel();
@@ -253,7 +253,7 @@ class BackgroundService {
         });
         _uiUpdateSubscription = null;
       }
-      
+
       if (_notificationUpdateSubscription != null) {
         await _notificationUpdateSubscription!.cancel().catchError((e) {
           debugPrint('Error cancelling notification update subscription: $e');
@@ -292,10 +292,10 @@ class BackgroundService {
       stopLock.completeError(e);
       // Still try to clean up resources even if there was an error
     }
-    
+
     // Wait for the lock to complete before proceeding
     await stopLock.future.catchError((e) => debugPrint('Error in stopTimer lock: $e'));
-    
+
     // Clear SharedPreferences data with error handling
     try {
       if (prefs != null) {
@@ -419,9 +419,9 @@ class BackgroundService {
       // Calculate backoff time based on error count (capped at 5 minutes)
       final backoffSeconds = math.min(math.pow(2, _errorCount - maxErrors).toInt() * 5, 300);
       final backoffDuration = Duration(seconds: backoffSeconds);
-      
+
       debugPrint('Too many errors, scheduling recovery in $backoffSeconds seconds');
-      
+
       // Schedule recovery with backoff instead of immediate restart
       Future.delayed(backoffDuration, () {
         // Check if conditions still warrant a restart
@@ -492,12 +492,12 @@ class BackgroundService {
   // Enhanced dispose method with proper resource cleanup and error handling
   Future<void> dispose() async {
     debugPrint('BackgroundService: Disposing resources');
-    
+
     try {
       // Cancel timer first to prevent any new events being sent to streams
       _timer?.cancel();
       _timer = null;
-      
+
       // Cancel subscriptions before closing controllers to prevent errors
       if (_uiUpdateSubscription != null) {
         await _uiUpdateSubscription!.cancel().catchError((e) {
@@ -505,21 +505,21 @@ class BackgroundService {
         });
         _uiUpdateSubscription = null;
       }
-      
+
       if (_notificationUpdateSubscription != null) {
         await _notificationUpdateSubscription!.cancel().catchError((e) {
           debugPrint('Error cancelling notification update subscription: $e');
         });
         _notificationUpdateSubscription = null;
       }
-      
+
       // Close stream controllers with error handling
       if (!_uiUpdateController.isClosed) {
         await _uiUpdateController.close().catchError((e) {
           debugPrint('Error closing UI update controller: $e');
         });
       }
-      
+
       if (!_notificationUpdateController.isClosed) {
         await _notificationUpdateController.close().catchError((e) {
           debugPrint('Error closing notification update controller: $e');
@@ -534,21 +534,21 @@ class BackgroundService {
       _activeActivityIcon = null;
       _errorCount = 0;
       _needInitialNotification = true;
-      
+
       // Clear any stored data
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('activeActivityId');
       await prefs.remove('activeActivityName');
       await prefs.remove('activeActivityIcon');
       await prefs.remove('startTime');
-      
+
       // Cancel notification if active
       if (_notificationActive) {
         await _cancelNotification().catchError((e) {
           debugPrint('Error cancelling notification during dispose: $e');
         });
       }
-      
+
       debugPrint('BackgroundService: Resources successfully disposed');
     } catch (e) {
       debugPrint('Error during BackgroundService dispose: $e');
