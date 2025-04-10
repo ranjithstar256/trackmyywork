@@ -79,7 +79,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           
           // Test Data Generator
-          ListTile(
+          /*ListTile(
             title: const Text('Test Data Generator'),
             subtitle: const Text('Generate test data for reports'),
             leading: const Icon(Icons.science),
@@ -91,7 +91,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
               );
             },
-          ),
+          ),*/
           
           const Divider(),
           

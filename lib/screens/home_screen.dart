@@ -25,6 +25,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   OverlayEntry? _overlayEntry;
   StreamSubscription<Duration>? _elapsedSubscription;
 
+// Add this field to your _HomeScreenState class
+  bool _hasRequestedBatteryOptimization = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +47,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowLongPressHint();
     });
+    // Check if we should ask about battery optimization
+    _checkBatteryOptimization();
+
+  }
+// Add this method to your _HomeScreenState class
+  Future<void> _checkBatteryOptimization() async {
+    // Only ask once per app session
+    if (_hasRequestedBatteryOptimization) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenBatteryDialog = prefs.getBool('hasSeenBatteryDialog') ?? false;
+
+    // If the user starts tracking for the first time, ask about battery optimization
+    if (!hasSeenBatteryDialog) {
+      await BackgroundService().requestBatteryOptimizationExemption(context);
+      await prefs.setBool('hasSeenBatteryDialog', true);
+      _hasRequestedBatteryOptimization = true;
+    }
   }
 
   @override
@@ -453,6 +474,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           return Column(
             children: [
+
               // Timer display
               if (isTracking)
                 Column(

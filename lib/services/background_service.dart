@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,8 +47,8 @@ class BackgroundService {
   StreamSubscription? _notificationUpdateSubscription;
 
   // Dynamic update intervals based on battery optimization
-  Duration _uiUpdateInterval = const Duration(seconds: 1);
-  Duration _notificationUpdateInterval = const Duration(seconds: 15);
+  Duration _uiUpdateInterval = const Duration(seconds: 5);
+  Duration _notificationUpdateInterval = const Duration(seconds: 30);
 
   // Track elapsed time
   DateTime? _startTime;
@@ -134,7 +135,7 @@ class BackgroundService {
     }
   }
 
-  Future<void> startTimer(
+/*  Future<void> startTimer(
       String activityId, String activityName, String activityIcon) async {
     debugPrint('Starting timer for activity: $activityId');
 
@@ -185,9 +186,13 @@ class BackgroundService {
     await prefs.setString('activeActivityName', activityName);
     await prefs.setString('activeActivityIcon', activityIcon);
     await prefs.setString('startTime', _startTime!.toIso8601String());
-  }
+  }*/
 
-  Future<void> stopTimer() async {
+
+
+
+
+ /* Future<void> stopTimer() async {
     debugPrint('Stopping timer');
 
     // Cancel timer
@@ -230,12 +235,63 @@ class BackgroundService {
     await _notificationUpdateController.close();
 
     // update ui to timer stopped
-    _uiUpdateController.add(Duration.zero);
-    _notificationUpdateController.add(Duration.zero);
+  //  _uiUpdateController.add(Duration.zero);
+    ///_notificationUpdateController.add(Duration.zero);
 
     debugPrint('Timer stopped');
     final timeTrackingService = Provider.of<TimeTrackingService>(navigatorKey.currentContext!, listen: false);
 
+    // Update the time tracking service
+     timeTrackingService.stopCurrentActivity();
+  }*/
+
+  // Modify your stopTimer method to stop the foreground service
+  Future<void> stopTimer() async {
+    debugPrint('Stopping timer');
+
+    // Cancel timer
+    _timer?.cancel();
+    _timer = null;
+
+    // Cancel subscriptions
+    await _uiUpdateSubscription?.cancel();
+    await _notificationUpdateSubscription?.cancel();
+
+    // Reset elapsed time
+    _elapsed = Duration.zero;
+
+    // Reset start time
+    _startTime = null;
+
+    // Reset active activity
+    _activeActivityId = null;
+    _activeActivityName = null;
+    _activeActivityIcon = null;
+
+    // Reset error count
+    _errorCount = 0;
+
+    // Reset notification flag
+    _needInitialNotification = true;
+
+    // Cancel notification
+    await _cancelNotification();
+
+    // Stop the foreground service
+    await stopForegroundService();
+
+    // Clear active activity details from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('activeActivityId');
+    await prefs.remove('activeActivityName');
+    await prefs.remove('activeActivityIcon');
+    await prefs.remove('startTime');
+
+    // update ui to timer stopped
+    _uiUpdateController.add(Duration.zero);
+    _notificationUpdateController.add(Duration.zero);
+
+    debugPrint('Timer stopped');
   }
 
   void _updateElapsedTime() {
@@ -298,6 +354,124 @@ class BackgroundService {
     }
   }
 
+
+
+  Future<void> setupHeartbeat() async {
+    if (Platform.isAndroid) {
+      try {
+        const platform = MethodChannel('tm.ranjith.trackmywork/background');
+        await platform.invokeMethod('setupHeartbeat', {
+          'intervalMinutes': 5, // How often to wake up the service
+        });
+        debugPrint('Heartbeat scheduled');
+      } catch (e) {
+        debugPrint('Error setting up heartbeat: $e');
+      }
+    }
+  }
+
+  Future<void> startForegroundService(String activityName, String activityIcon) async {
+    try {
+      const platform = MethodChannel('tm.ranjith.trackmywork/background');
+      await platform.invokeMethod('startForegroundService', {
+        'activityName': activityName,
+        'iconName': activityIcon,
+      });
+      debugPrint('Started foreground service for: $activityName');
+    } catch (e) {
+      debugPrint('Error starting foreground service: $e');
+    }
+  }
+
+  Future<void> updateForegroundService(String activityName, String formattedTime, String activityIcon) async {
+    try {
+      const platform = MethodChannel('tm.ranjith.trackmywork/background');
+      await platform.invokeMethod('updateForegroundService', {
+        'activityName': activityName,
+        'formattedTime': formattedTime,
+        'iconName': activityIcon,
+      });
+    } catch (e) {
+      debugPrint('Error updating foreground service: $e');
+    }
+  }
+
+  Future<void> stopForegroundService() async {
+    try {
+      const platform = MethodChannel('tm.ranjith.trackmywork/background');
+      await platform.invokeMethod('stopForegroundService');
+      debugPrint('Stopped foreground service');
+    } catch (e) {
+      debugPrint('Error stopping foreground service: $e');
+    }
+  }
+
+  // Modify your startTimer method to use the foreground service and heartbeat
+  Future<void> startTimer(String activityId, String activityName, String activityIcon) async {
+    debugPrint('Starting timer for activity: $activityId');
+
+    // Store active activity details
+    _activeActivityId = activityId;
+    _activeActivityName = activityName;
+    _activeActivityIcon = activityIcon;
+
+    // Reset error count
+    _errorCount = 0;
+    _lastErrorTime = null;
+
+    // Reset elapsed time
+    _elapsed = Duration.zero;
+
+    // Set start time
+    _startTime = DateTime.now();
+
+    // Cancel existing timer if any
+    _timer?.cancel();
+
+    // Cancel existing subscriptions if any
+    await _uiUpdateSubscription?.cancel();
+    await _notificationUpdateSubscription?.cancel();
+
+    // Start UI update stream with dynamic interval
+    _uiUpdateSubscription = Stream.periodic(_uiUpdateInterval).listen((_) {
+      _updateElapsedTime();
+      _uiUpdateController.add(_elapsed);
+    });
+
+    // Start notification update stream with dynamic interval
+    _notificationUpdateSubscription =
+        Stream.periodic(_notificationUpdateInterval).listen((_) {
+          _updateElapsedTime();
+          _updateNotification();
+
+          // Also update the foreground service with the current time
+          if (_activeActivityName != null && _activeActivityIcon != null) {
+            final formattedTime = formatDuration(_elapsed);
+            updateForegroundService(_activeActivityName!, formattedTime, _activeActivityIcon!);
+          }
+        });
+
+    // Show initial notification
+    if (_needInitialNotification) {
+      await _showNotification();
+      _needInitialNotification = false;
+    }
+
+    // Start the foreground service
+    await startForegroundService(activityName, activityIcon);
+
+    // Set up heartbeat to keep service alive
+    await setupHeartbeat();
+
+    // Store active activity details in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('activeActivityId', activityId);
+    await prefs.setString('activeActivityName', activityName);
+    await prefs.setString('activeActivityIcon', activityIcon);
+    await prefs.setString('startTime', _startTime!.toIso8601String());
+  }
+
+
   void _handleError() {
     final now = DateTime.now();
 
@@ -313,6 +487,42 @@ class BackgroundService {
     if (_errorCount >= maxErrors) {
       debugPrint('Too many errors, attempting to restart timer');
       _restartTimer();
+    }
+  }
+// Add this function to the BackgroundService class in lib/services/background_service.dart
+  Future<void> requestBatteryOptimizationExemption(BuildContext context) async {
+    if (Platform.isAndroid) {
+      // Show a dialog explaining why this is needed
+      bool? userAgreed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Battery Optimization'),
+          content: const Text(
+            'To ensure accurate time tracking, please disable battery optimization for this app. '
+                'This allows the timer to run properly even when the app is in the background.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+
+      if (userAgreed == true) {
+        // Open battery optimization settings
+        const platform = MethodChannel('tm.ranjith.trackmywork/battery');
+        try {
+          await platform.invokeMethod('openBatterySettings');
+        } catch (e) {
+          debugPrint('Error opening battery settings: $e');
+        }
+      }
     }
   }
 
@@ -388,3 +598,4 @@ class BackgroundService {
     await prefs.remove('startTime');
   }
 }
+

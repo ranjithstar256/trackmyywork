@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -123,7 +125,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeService = Provider.of<ThemeService>(context);
-
+    BackgroundService().requestBatteryOptimizationExemption(context);
+    requestBatteryOptimizationExemption( context);
     return MaterialApp(
       navigatorKey: navigatorKey,
       title: 'TrackMyWork',
@@ -155,5 +158,41 @@ class MyApp extends StatelessWidget {
         '/subscription': (context) => const SubscriptionScreen(),
       },
     );
+  }
+}
+// Add this function to the BackgroundService class in lib/services/background_service.dart
+Future<void> requestBatteryOptimizationExemption(BuildContext context) async {
+  if (Platform.isAndroid) {
+    // Show a dialog explaining why this is needed
+    bool? userAgreed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Battery Optimization'),
+        content: const Text(
+          'To ensure accurate time tracking, please disable battery optimization for this app. '
+              'This allows the timer to run properly even when the app is in the background.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+
+    if (userAgreed == true) {
+      // Open battery optimization settings
+      const platform = MethodChannel('tm.ranjith.trackmywork/battery');
+      try {
+        await platform.invokeMethod('openBatterySettings');
+      } catch (e) {
+        debugPrint('Error opening battery settings: $e');
+      }
+    }
   }
 }
