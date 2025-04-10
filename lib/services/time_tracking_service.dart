@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/activity.dart';
@@ -14,6 +14,8 @@ class TimeTrackingService extends ChangeNotifier {
   // Keys for SharedPreferences (only used for current activity state)
   static const String _currentActivityIdKey = 'current_activity_id';
   static const String _isTrackingKey = 'is_tracking';
+// Add this field to your _HomeScreenState class
+  bool _hasRequestedBatteryOptimization = false;
 
   // Database helper
   final DatabaseHelper _dbHelper = DatabaseHelper();
@@ -106,6 +108,21 @@ class TimeTrackingService extends ChangeNotifier {
       });
       
       debugPrint('TimeTrackingService: Started update timer with frequency ${updateFrequency.inSeconds} seconds');
+    }
+  }
+  // Add this method to your _HomeScreenState class
+  Future<void> _checkBatteryOptimization() async {
+    // Only ask once per app session
+    if (_hasRequestedBatteryOptimization) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenBatteryDialog = prefs.getBool('hasSeenBatteryDialog') ?? false;
+
+    // If the user starts tracking for the first time, ask about battery optimization
+    if (!hasSeenBatteryDialog) {
+      await BackgroundService().requestBatteryOptimizationExemption(context as BuildContext);
+      await prefs.setBool('hasSeenBatteryDialog', true);
+      _hasRequestedBatteryOptimization = true;
     }
   }
   
@@ -319,6 +336,7 @@ class TimeTrackingService extends ChangeNotifier {
       ),
     );
 
+
     final now = DateTime.now();
     final timeEntry = TimeEntry(
       id: const Uuid().v4(),
@@ -343,6 +361,15 @@ class TimeTrackingService extends ChangeNotifier {
 
     // Start the background service timer
     await BackgroundService().startTimer(activityId, activity.name, activity.icon);
+
+    // After starting the timer, check if this is the first time we're tracking
+    // and ask about battery optimization
+    if (!_hasRequestedBatteryOptimization) {
+      _hasRequestedBatteryOptimization = true;
+      await BackgroundService().requestBatteryOptimizationExemption(context as BuildContext);
+    }
+
+
 
     // Save tracking state to SharedPreferences
     await _prefs.setString(_currentActivityIdKey, activityId);
