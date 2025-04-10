@@ -229,12 +229,14 @@ class BackgroundService {
     await _uiUpdateController.close();
     await _notificationUpdateController.close();
 
-    // update ui to timer stopped
-    _uiUpdateController.add(Duration.zero);
-    _notificationUpdateController.add(Duration.zero);
+
 
     debugPrint('Timer stopped');
+
     final timeTrackingService = Provider.of<TimeTrackingService>(navigatorKey.currentContext!, listen: false);
+
+    // Update the time tracking service
+    timeTrackingService.stopCurrentActivity();
 
   }
 
