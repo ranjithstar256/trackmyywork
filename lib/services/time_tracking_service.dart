@@ -228,7 +228,7 @@ class TimeTrackingService extends ChangeNotifier {
   // Lock to prevent concurrent execution of _checkForActiveTimeEntries
   Completer<void>? _checkActiveLock;
   bool _isCheckingActiveEntries = false;
-  
+
   Future<void> _checkForActiveTimeEntries() async {
     // Prevent concurrent execution
     if (_isCheckingActiveEntries) {
@@ -238,11 +238,11 @@ class TimeTrackingService extends ChangeNotifier {
       }
       return;
     }
-    
+
     // Create a new lock for this execution
     _checkActiveLock = Completer<void>();
     _isCheckingActiveEntries = true;
-    
+
     try {
       // Check if there's an active time entry from the background service
       final activeDetails = await BackgroundService().getActiveActivityDetails();
@@ -250,6 +250,11 @@ class TimeTrackingService extends ChangeNotifier {
       if (activeDetails == null) {
         debugPrint('No active activity found in background service');
         _currentActivityId = null;
+        _isCheckingActiveEntries = false;
+        if (_checkActiveLock != null) {
+          _checkActiveLock!.complete();
+          _checkActiveLock = null;
+        }
         return;
       }
 
@@ -258,7 +263,7 @@ class TimeTrackingService extends ChangeNotifier {
 
       // Check if we already have an active time entry for this activity
       final ongoingEntry = await _dbHelper.getOngoingTimeEntry();
-      
+
       if (ongoingEntry == null) {
         debugPrint('Creating new time entry for active activity: $activityId');
         // Create a new time entry for the active activity
@@ -275,7 +280,11 @@ class TimeTrackingService extends ChangeNotifier {
         _timeEntries.add(newTimeEntry);
         _currentActivityId = activityId;
         notifyListeners();
-        return;
+      } else {
+        // If there's an active entry, set it as the current activity
+        debugPrint('Found existing time entry for active activity: ${ongoingEntry.activityId}');
+        _currentActivityId = ongoingEntry.activityId;
+        notifyListeners();
       }
     } catch (e) {
       debugPrint('Error checking for active time entries: $e');
@@ -286,13 +295,7 @@ class TimeTrackingService extends ChangeNotifier {
         _checkActiveLock = null;
       }
     }
-
-    // If there's an active entry, set it as the current activity
-    debugPrint('Found existing time entry for active activity: ${ongoingEntry.activityId}');
-    _currentActivityId = ongoingEntry.activityId;
-    notifyListeners();
   }
-
   Future<void> startActivity(String activityId) async {
     debugPrint('Starting activity: $activityId');
 

@@ -137,72 +137,129 @@ class BackgroundService {
 
   Future<void> startTimer(
       String activityId, String activityName, String activityIcon) async {
-    debugPrint('Starting timer for activity: $activityId');
-
-    // Store active activity details
-    _activeActivityId = activityId;
-    _activeActivityName = activityName;
-    _activeActivityIcon = activityIcon;
-
-    // Reset error count
-    _errorCount = 0;
-    _lastErrorTime = null;
-
-    // Reset elapsed time
-    _elapsed = Duration.zero;
-
-    // Set start time
-    _startTime = DateTime.now();
-
-    // Cancel existing timer if any
-    _timer?.cancel();
-
-    // Cancel existing subscriptions if any
-    await _uiUpdateSubscription?.cancel();
-    await _notificationUpdateSubscription?.cancel();
-
-    // Start UI update stream with dynamic interval
-    _uiUpdateSubscription = Stream.periodic(_uiUpdateInterval).listen((_) {
-      _updateElapsedTime();
-      _uiUpdateController.add(_elapsed);
-    });
-
-    // Start notification update stream with dynamic interval
-    _notificationUpdateSubscription =
-        Stream.periodic(_notificationUpdateInterval).listen((_) {
-      _updateElapsedTime();
-      _updateNotification();
-    });
-
-    // Show initial notification
-    if (_needInitialNotification) {
-      await _showNotification();
-      _needInitialNotification = false;
-    }
-
-    // Store active activity details in SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('activeActivityId', activityId);
-    await prefs.setString('activeActivityName', activityName);
-    await prefs.setString('activeActivityIcon', activityIcon);
-    await prefs.setString('startTime', _startTime!.toIso8601String());
-  }
-
-  Future<void> stopTimer() async {
-    debugPrint('Stopping timer');
-
-    // Use a lock to prevent concurrent modifications
-    final stopLock = Completer<void>();
+    debugPrint('BackgroundService: Starting timer for activity: $activityId');
+    
     try {
-      // Cancel timer
+      // Store active activity details
+      _activeActivityId = activityId;
+      _activeActivityName = activityName;
+      _activeActivityIcon = activityIcon;
+
+      // Reset error count
+      _errorCount = 0;
+      _lastErrorTime = null;
+
+      // Reset elapsed time
+      _elapsed = Duration.zero;
+
+      // Set start time
+      _startTime = DateTime.now();
+
+      // Cancel existing timer if any
       _timer?.cancel();
       _timer = null;
 
-      // Cancel subscriptions and set to null to prevent reuse
-      await _uiUpdateSubscription?.cancel();
-      _uiUpdateSubscription = null;
-      await _notificationUpdateSubscription?.cancel();
-      _notificationUpdateSubscription = null;
+      // Cancel existing subscriptions with error handling
+      if (_uiUpdateSubscription != null) {
+        await _uiUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling UI update subscription: $e');
+        });
+        _uiUpdateSubscription = null;
+      }
+      
+      if (_notificationUpdateSubscription != null) {
+        await _notificationUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling notification update subscription: $e');
+        });
+        _notificationUpdateSubscription = null;
+      }
+
+      // Start UI update stream with dynamic interval and error handling
+      _uiUpdateSubscription = Stream.periodic(_uiUpdateInterval).listen(
+        (_) {
+          try {
+            _updateElapsedTime();
+            if (!_uiUpdateController.isClosed) {
+              _uiUpdateController.add(_elapsed);
+            }
+          } catch (e) {
+            debugPrint('Error in UI update stream: $e');
+          }
+        },
+        onError: (e) {
+          debugPrint('Error in UI update stream: $e');
+        },
+      );
+
+      // Start notification update stream with dynamic interval and error handling
+      _notificationUpdateSubscription = Stream.periodic(_notificationUpdateInterval).listen(
+        (_) {
+          try {
+            _updateElapsedTime();
+            _updateNotification();
+          } catch (e) {
+            debugPrint('Error in notification update stream: $e');
+          }
+        },
+        onError: (e) {
+          debugPrint('Error in notification update stream: $e');
+        },
+      );
+
+      // Show initial notification with error handling
+      if (_needInitialNotification) {
+        await _showNotification().catchError((e) {
+          debugPrint('Error showing initial notification: $e');
+        });
+        _needInitialNotification = false;
+      }
+
+      // Store active activity details in SharedPreferences with error handling
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('activeActivityId', activityId);
+        await prefs.setString('activeActivityName', activityName);
+        await prefs.setString('activeActivityIcon', activityIcon);
+        await prefs.setString('startTime', _startTime!.toIso8601String());
+      } catch (e) {
+        debugPrint('Error storing activity details in SharedPreferences: $e');
+        // Continue even if SharedPreferences fails, as we have in-memory state
+      }
+      
+      debugPrint('BackgroundService: Timer started successfully');
+    } catch (e) {
+      debugPrint('Error starting timer: $e');
+      // Attempt recovery
+      _handleError();
+    }
+  }
+
+  Future<void> stopTimer() async {
+    debugPrint('BackgroundService: Stopping timer');
+
+    // Use a lock to prevent concurrent modifications
+    final stopLock = Completer<void>();
+    SharedPreferences? prefs;
+    
+    try {
+      // Cancel timer first to prevent any new events
+      _timer?.cancel();
+      _timer = null;
+
+      // Cancel subscriptions with error handling
+      if (_uiUpdateSubscription != null) {
+        await _uiUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling UI update subscription: $e');
+        });
+        _uiUpdateSubscription = null;
+      }
+      
+      if (_notificationUpdateSubscription != null) {
+        await _notificationUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling notification update subscription: $e');
+        });
+        _notificationUpdateSubscription = null;
+      }
 
       // Reset elapsed time
       _elapsed = Duration.zero;
@@ -221,11 +278,14 @@ class BackgroundService {
       // Reset notification flag
       _needInitialNotification = true;
 
-      // Cancel notification
-      await _cancelNotification();
+      // Cancel notification with error handling
+      await _cancelNotification().catchError((e) {
+        debugPrint('Error cancelling notification: $e');
+      });
+      _notificationActive = false;
 
-      // Clear active activity details from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
+      // Get SharedPreferences instance
+      prefs = await SharedPreferences.getInstance();
       stopLock.complete();
     } catch (e) {
       debugPrint('Error stopping timer: $e');
@@ -236,24 +296,50 @@ class BackgroundService {
     // Wait for the lock to complete before proceeding
     await stopLock.future.catchError((e) => debugPrint('Error in stopTimer lock: $e'));
     
-    await prefs.remove('activeActivityId');
-    await prefs.remove('activeActivityName');
-    await prefs.remove('activeActivityIcon');
-    await prefs.remove('startTime');
+    // Clear SharedPreferences data with error handling
+    try {
+      if (prefs != null) {
+        await prefs.remove('activeActivityId');
+        await prefs.remove('activeActivityName');
+        await prefs.remove('activeActivityIcon');
+        await prefs.remove('startTime');
+      } else {
+        // Try to get prefs again if it was null
+        prefs = await SharedPreferences.getInstance();
+        await prefs.remove('activeActivityId');
+        await prefs.remove('activeActivityName');
+        await prefs.remove('activeActivityIcon');
+        await prefs.remove('startTime');
+      }
+    } catch (e) {
+      debugPrint('Error clearing SharedPreferences: $e');
+    }
 
     // Don't close stream controllers here, just reset them
     // This allows the service to be reused without recreating controllers
     // Controllers will be properly closed in dispose() method
-    _uiUpdateController.add(Duration.zero);
-    _notificationUpdateController.add(Duration.zero);
+    try {
+      if (!_uiUpdateController.isClosed) {
+        _uiUpdateController.add(Duration.zero);
+      }
+      if (!_notificationUpdateController.isClosed) {
+        _notificationUpdateController.add(Duration.zero);
+      }
+    } catch (e) {
+      debugPrint('Error resetting stream controllers: $e');
+    }
 
-    debugPrint('Timer stopped');
+    debugPrint('BackgroundService: Timer stopped successfully');
 
-    final timeTrackingService = Provider.of<TimeTrackingService>(navigatorKey.currentContext!, listen: false);
-
-    // Update the time tracking service
-    timeTrackingService.stopCurrentActivity();
-
+    try {
+      // Update the time tracking service if context is available
+      if (navigatorKey.currentContext != null) {
+        final timeTrackingService = Provider.of<TimeTrackingService>(navigatorKey.currentContext!, listen: false);
+        timeTrackingService.stopCurrentActivity();
+      }
+    } catch (e) {
+      debugPrint('Error updating TimeTrackingService: $e');
+    }
   }
 
   void _updateElapsedTime() {
@@ -403,42 +489,73 @@ class BackgroundService {
     return '$hours:$minutes:$seconds';
   }
 
-  // Enhanced dispose method with proper resource cleanup
+  // Enhanced dispose method with proper resource cleanup and error handling
   Future<void> dispose() async {
-    // Cancel timer first to prevent any new events being sent to streams
-    _timer?.cancel();
-    _timer = null;
+    debugPrint('BackgroundService: Disposing resources');
     
-    // Cancel subscriptions before closing controllers to prevent errors
-    await _uiUpdateSubscription?.cancel();
-    _uiUpdateSubscription = null;
-    await _notificationUpdateSubscription?.cancel();
-    _notificationUpdateSubscription = null;
-    
-    // Close stream controllers
-    if (!_uiUpdateController.isClosed) {
-      await _uiUpdateController.close();
-    }
-    if (!_notificationUpdateController.isClosed) {
-      await _notificationUpdateController.close();
-    }
+    try {
+      // Cancel timer first to prevent any new events being sent to streams
+      _timer?.cancel();
+      _timer = null;
+      
+      // Cancel subscriptions before closing controllers to prevent errors
+      if (_uiUpdateSubscription != null) {
+        await _uiUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling UI update subscription: $e');
+        });
+        _uiUpdateSubscription = null;
+      }
+      
+      if (_notificationUpdateSubscription != null) {
+        await _notificationUpdateSubscription!.cancel().catchError((e) {
+          debugPrint('Error cancelling notification update subscription: $e');
+        });
+        _notificationUpdateSubscription = null;
+      }
+      
+      // Close stream controllers with error handling
+      if (!_uiUpdateController.isClosed) {
+        await _uiUpdateController.close().catchError((e) {
+          debugPrint('Error closing UI update controller: $e');
+        });
+      }
+      
+      if (!_notificationUpdateController.isClosed) {
+        await _notificationUpdateController.close().catchError((e) {
+          debugPrint('Error closing notification update controller: $e');
+        });
+      }
 
-    // Reset state variables
-    _elapsed = Duration.zero;
-    _startTime = null;
-    _activeActivityId = null;
-    _activeActivityName = null;
-    _activeActivityIcon = null;
-    _errorCount = 0;
-    _needInitialNotification = true;
-    
-    // Clear any stored data
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('activeActivityId');
-    await prefs.remove('activeActivityName');
-    await prefs.remove('activeActivityIcon');
-    await prefs.remove('startTime');
-    
-    debugPrint('BackgroundService resources disposed');
+      // Reset state variables
+      _elapsed = Duration.zero;
+      _startTime = null;
+      _activeActivityId = null;
+      _activeActivityName = null;
+      _activeActivityIcon = null;
+      _errorCount = 0;
+      _needInitialNotification = true;
+      
+      // Clear any stored data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('activeActivityId');
+      await prefs.remove('activeActivityName');
+      await prefs.remove('activeActivityIcon');
+      await prefs.remove('startTime');
+      
+      // Cancel notification if active
+      if (_notificationActive) {
+        await _cancelNotification().catchError((e) {
+          debugPrint('Error cancelling notification during dispose: $e');
+        });
+      }
+      
+      debugPrint('BackgroundService: Resources successfully disposed');
+    } catch (e) {
+      debugPrint('Error during BackgroundService dispose: $e');
+      // Even if there's an error, we should ensure resources are cleaned up
+      _timer = null;
+      _uiUpdateSubscription = null;
+      _notificationUpdateSubscription = null;
+    }
   }
 }
