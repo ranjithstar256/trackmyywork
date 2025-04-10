@@ -42,7 +42,10 @@ class TimeTrackingService extends ChangeNotifier {
   Timer? _updateTimer;
   
   // Update frequency in seconds (adjust as needed for battery optimization)
-  static const int _updateFrequencySeconds = 5;
+  static const int _updateFrequencySeconds = 10; // Increased to reduce battery usage
+  
+  // Track app lifecycle state to manage timers properly
+  bool _isInBackground = false;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -80,21 +83,98 @@ class TimeTrackingService extends ChangeNotifier {
     
     // Only start the timer if we're tracking an activity
     if (_isTracking && _currentActivityId != null) {
+      // Use different update frequencies based on app state
+      final updateFrequency = _isInBackground 
+          ? Duration(seconds: _updateFrequencySeconds * 3) // Less frequent updates in background
+          : Duration(seconds: _updateFrequencySeconds);     // Normal frequency in foreground
+      
       // Create a timer that updates at the specified frequency
-      _updateTimer = Timer.periodic(Duration(seconds: _updateFrequencySeconds), (_) {
-        // Notify all listeners that the time has updated
-        _activityUpdateController.add(null);
-        debugPrint('TimeTrackingService: Broadcasting time update to all listeners');
+      _updateTimer = Timer.periodic(updateFrequency, (_) {
+        try {
+          // Notify all listeners that the time has updated
+          if (!_activityUpdateController.isClosed) {
+            _activityUpdateController.add(null);
+          }
+          
+          // Only log in debug mode to reduce overhead
+          if (kDebugMode) {
+            debugPrint('TimeTrackingService: Broadcasting time update to all listeners');
+          }
+        } catch (e) {
+          debugPrint('Error in update timer: $e');
+        }
       });
-      debugPrint('TimeTrackingService: Started update timer with frequency $_updateFrequencySeconds seconds');
+      
+      debugPrint('TimeTrackingService: Started update timer with frequency ${updateFrequency.inSeconds} seconds');
     }
   }
   
   @override
   void dispose() {
     _updateTimer?.cancel();
-    _activityUpdateController.close();
+    _updateTimer = null;
+    
+    // Make sure we close the controller only if it's not already closed
+    if (!_activityUpdateController.isClosed) {
+      _activityUpdateController.close();
+    }
+    
+    // Ensure background service is properly disposed if the app is being terminated
+    BackgroundService().dispose().catchError((e) {
+      debugPrint('Error disposing background service: $e');
+    });
+    
     super.dispose();
+  }
+  
+  // Handle app lifecycle changes to manage timers properly
+  void handleAppLifecycleChange(AppLifecycleState state) {
+    debugPrint('TimeTrackingService: App lifecycle changed to $state');
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _isInBackground = false;
+        // Refresh data and restart UI updates when app is resumed
+        refreshTimeEntries();
+        _setupUpdateTimer();
+        break;
+        
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        _isInBackground = true;
+        // Reduce update frequency when app is in background
+        _optimizeTimerForBackground();
+        break;
+        
+      case AppLifecycleState.detached:
+        // App is being terminated, ensure all resources are released
+        _updateTimer?.cancel();
+        _updateTimer = null;
+        break;
+        
+      default:
+        break;
+    }
+  }
+  
+  // Optimize timer frequency based on app state
+  void _optimizeTimerForBackground() {
+    if (!_isTracking || _currentActivityId == null) return;
+    
+    // Cancel existing timer
+    _updateTimer?.cancel();
+    
+    // If in background, use a less frequent update interval to save battery
+    if (_isInBackground) {
+      _updateTimer = Timer.periodic(const Duration(seconds: _updateFrequencySeconds * 3), (_) {
+        // Only perform essential updates in background
+        _activityUpdateController.add(null);
+      });
+      debugPrint('TimeTrackingService: Optimized timer for background mode');
+    } else {
+      // In foreground, use normal update frequency
+      _setupUpdateTimer();
+    }
   }
 
   List<Activity> get activities => _activities;
@@ -145,39 +225,66 @@ class TimeTrackingService extends ChangeNotifier {
     // No need to do anything as database operations are performed immediately
   }
 
+  // Lock to prevent concurrent execution of _checkForActiveTimeEntries
+  Completer<void>? _checkActiveLock;
+  bool _isCheckingActiveEntries = false;
+  
   Future<void> _checkForActiveTimeEntries() async {
-    // Check if there's an active time entry from the background service
-    final activeDetails = await BackgroundService().getActiveActivityDetails();
-
-    if (activeDetails == null) {
-      debugPrint('No active activity found in background service');
-      _currentActivityId = null;
+    // Prevent concurrent execution
+    if (_isCheckingActiveEntries) {
+      debugPrint('Already checking for active entries, waiting for completion');
+      if (_checkActiveLock != null) {
+        await _checkActiveLock!.future;
+      }
       return;
     }
-
-    final activityId = activeDetails['id'] as String;
-    debugPrint('Found active activity in background service: $activityId');
-
-    // Check if we already have an active time entry for this activity
-    final ongoingEntry = await _dbHelper.getOngoingTimeEntry();
     
-    if (ongoingEntry == null) {
-      debugPrint('Creating new time entry for active activity: $activityId');
-      // Create a new time entry for the active activity
-      final startTime = DateTime.now().subtract(activeDetails['elapsed'] as Duration);
+    // Create a new lock for this execution
+    _checkActiveLock = Completer<void>();
+    _isCheckingActiveEntries = true;
+    
+    try {
+      // Check if there's an active time entry from the background service
+      final activeDetails = await BackgroundService().getActiveActivityDetails();
 
-      final newTimeEntry = TimeEntry(
-        id: const Uuid().v4(),
-        activityId: activityId,
-        startTime: startTime,
-        endTime: null,
-      );
+      if (activeDetails == null) {
+        debugPrint('No active activity found in background service');
+        _currentActivityId = null;
+        return;
+      }
 
-      await _dbHelper.insertTimeEntry(newTimeEntry);
-      _timeEntries.add(newTimeEntry);
-      _currentActivityId = activityId;
-      notifyListeners();
-      return;
+      final activityId = activeDetails['id'] as String;
+      debugPrint('Found active activity in background service: $activityId');
+
+      // Check if we already have an active time entry for this activity
+      final ongoingEntry = await _dbHelper.getOngoingTimeEntry();
+      
+      if (ongoingEntry == null) {
+        debugPrint('Creating new time entry for active activity: $activityId');
+        // Create a new time entry for the active activity
+        final startTime = DateTime.now().subtract(activeDetails['elapsed'] as Duration);
+
+        final newTimeEntry = TimeEntry(
+          id: const Uuid().v4(),
+          activityId: activityId,
+          startTime: startTime,
+          endTime: null,
+        );
+
+        await _dbHelper.insertTimeEntry(newTimeEntry);
+        _timeEntries.add(newTimeEntry);
+        _currentActivityId = activityId;
+        notifyListeners();
+        return;
+      }
+    } catch (e) {
+      debugPrint('Error checking for active time entries: $e');
+    } finally {
+      _isCheckingActiveEntries = false;
+      if (_checkActiveLock != null) {
+        _checkActiveLock!.complete();
+        _checkActiveLock = null;
+      }
     }
 
     // If there's an active entry, set it as the current activity

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart';
@@ -190,46 +191,61 @@ class BackgroundService {
   Future<void> stopTimer() async {
     debugPrint('Stopping timer');
 
-    // Cancel timer
-    _timer?.cancel();
-    _timer = null;
+    // Use a lock to prevent concurrent modifications
+    final stopLock = Completer<void>();
+    try {
+      // Cancel timer
+      _timer?.cancel();
+      _timer = null;
 
-    // Cancel subscriptions
-    await _uiUpdateSubscription?.cancel();
-    await _notificationUpdateSubscription?.cancel();
+      // Cancel subscriptions and set to null to prevent reuse
+      await _uiUpdateSubscription?.cancel();
+      _uiUpdateSubscription = null;
+      await _notificationUpdateSubscription?.cancel();
+      _notificationUpdateSubscription = null;
 
-    // Reset elapsed time
-    _elapsed = Duration.zero;
+      // Reset elapsed time
+      _elapsed = Duration.zero;
 
-    // Reset start time
-    _startTime = null;
+      // Reset start time
+      _startTime = null;
 
-    // Reset active activity
-    _activeActivityId = null;
-    _activeActivityName = null;
-    _activeActivityIcon = null;
+      // Reset active activity
+      _activeActivityId = null;
+      _activeActivityName = null;
+      _activeActivityIcon = null;
 
-    // Reset error count
-    _errorCount = 0;
+      // Reset error count
+      _errorCount = 0;
 
-    // Reset notification flag
-    _needInitialNotification = true;
+      // Reset notification flag
+      _needInitialNotification = true;
 
-    // Cancel notification
-    await _cancelNotification();
+      // Cancel notification
+      await _cancelNotification();
 
-    // Clear active activity details from SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
+      // Clear active activity details from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      stopLock.complete();
+    } catch (e) {
+      debugPrint('Error stopping timer: $e');
+      stopLock.completeError(e);
+      // Still try to clean up resources even if there was an error
+    }
+    
+    // Wait for the lock to complete before proceeding
+    await stopLock.future.catchError((e) => debugPrint('Error in stopTimer lock: $e'));
+    
     await prefs.remove('activeActivityId');
     await prefs.remove('activeActivityName');
     await prefs.remove('activeActivityIcon');
     await prefs.remove('startTime');
 
-    // Close stream controllers
-    await _uiUpdateController.close();
-    await _notificationUpdateController.close();
-
-
+    // Don't close stream controllers here, just reset them
+    // This allows the service to be reused without recreating controllers
+    // Controllers will be properly closed in dispose() method
+    _uiUpdateController.add(Duration.zero);
+    _notificationUpdateController.add(Duration.zero);
 
     debugPrint('Timer stopped');
 
@@ -312,9 +328,22 @@ class BackgroundService {
     _errorCount++;
     _lastErrorTime = now;
 
+    // Implement exponential backoff for recovery attempts
     if (_errorCount >= maxErrors) {
-      debugPrint('Too many errors, attempting to restart timer');
-      _restartTimer();
+      // Calculate backoff time based on error count (capped at 5 minutes)
+      final backoffSeconds = math.min(math.pow(2, _errorCount - maxErrors).toInt() * 5, 300);
+      final backoffDuration = Duration(seconds: backoffSeconds);
+      
+      debugPrint('Too many errors, scheduling recovery in $backoffSeconds seconds');
+      
+      // Schedule recovery with backoff instead of immediate restart
+      Future.delayed(backoffDuration, () {
+        // Check if conditions still warrant a restart
+        if (_errorCount >= maxErrors) {
+          debugPrint('Attempting recovery after backoff period');
+          _restartTimer();
+        }
+      });
     }
   }
 
@@ -374,19 +403,42 @@ class BackgroundService {
     return '$hours:$minutes:$seconds';
   }
 
-  // Enhanced dispose method
+  // Enhanced dispose method with proper resource cleanup
   Future<void> dispose() async {
-    await _uiUpdateController.close();
-    await _notificationUpdateController.close();
-    await _uiUpdateSubscription?.cancel();
-    await _notificationUpdateSubscription?.cancel();
+    // Cancel timer first to prevent any new events being sent to streams
     _timer?.cancel();
+    _timer = null;
+    
+    // Cancel subscriptions before closing controllers to prevent errors
+    await _uiUpdateSubscription?.cancel();
+    _uiUpdateSubscription = null;
+    await _notificationUpdateSubscription?.cancel();
+    _notificationUpdateSubscription = null;
+    
+    // Close stream controllers
+    if (!_uiUpdateController.isClosed) {
+      await _uiUpdateController.close();
+    }
+    if (!_notificationUpdateController.isClosed) {
+      await _notificationUpdateController.close();
+    }
 
+    // Reset state variables
+    _elapsed = Duration.zero;
+    _startTime = null;
+    _activeActivityId = null;
+    _activeActivityName = null;
+    _activeActivityIcon = null;
+    _errorCount = 0;
+    _needInitialNotification = true;
+    
     // Clear any stored data
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('activeActivityId');
     await prefs.remove('activeActivityName');
     await prefs.remove('activeActivityIcon');
     await prefs.remove('startTime');
+    
+    debugPrint('BackgroundService resources disposed');
   }
 }

@@ -60,7 +60,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _elapsedSubscription?.cancel();
+    
+    // Safely cancel subscription
+    if (_elapsedSubscription != null) {
+      _elapsedSubscription!.cancel();
+      _elapsedSubscription = null;
+    }
+    
     _removeOverlay();
     super.dispose();
   }
