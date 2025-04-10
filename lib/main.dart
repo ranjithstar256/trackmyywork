@@ -12,6 +12,7 @@ import 'services/premium_features_service.dart';
 import 'services/subscription_service.dart';
 import 'services/ad_service.dart';
 import 'services/theme_service.dart';
+import 'services/database_helper.dart';
 import 'screens/home_screen.dart';
 import 'screens/add_activity_screen.dart';
 import 'screens/reports_screen.dart';
@@ -78,6 +79,10 @@ Future<void> initializeServices() async {
   // Initialize AdMob
   await MobileAds.instance.initialize();
 
+  // Initialize database
+  final databaseHelper = DatabaseHelper();
+  await databaseHelper.initDatabase();
+  
   // Initialize services
   final timeTrackingService = TimeTrackingService();
   final subscriptionService = SubscriptionService();

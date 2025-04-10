@@ -4,7 +4,7 @@ description: A time tracking app to monitor your daily activities and improve pr
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-# The following defines the version and build number for your application.
+# The following de-fines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
 # followed by an optional build number separated by a +.
 # Both the version and the builder number may be overridden in flutter
@@ -37,30 +37,37 @@ dependencies:
   google_fonts: ^6.1.0
   uuid: ^4.2.2
   in_app_purchase: ^3.1.11
-  google_mobile_ads: ^4.0.0
+  google_mobile_ads: ^2.4.0  # Downgraded to be compatible with WebView 3.0.4
   firebase_core: ^2.24.2
   firebase_analytics: ^10.7.4
   firebase_auth: ^4.15.3
   cloud_firestore: ^4.13.6
+  firebase_storage: ^11.5.6
+  firebase_messaging: ^14.7.9
   flutter_local_notifications: ^17.2.1
   device_info_plus: ^9.1.2
   
   # Reduce APK size by using optimized packages
   flutter_displaymode: ^0.6.0  # Helps with display refresh rate
   flutter_svg: ^2.0.17
+  webview_flutter: 3.0.4  # Use a specific version known to be stable
   
   # App introduction slider
   introduction_screen: ^3.1.12
   
   # Explicitly specify webview_flutter version
-  webview_flutter: 4.4.2
-
+  # webview_flutter: 4.4.2
+  sqflite: 2.2.8+4
+  path_provider: ^2.1.2
+  path: ^1.8.3
+  share_plus: ^7.2.1
+  
 # Add dependency overrides to fix compatibility issues
 dependency_overrides:
-  webview_flutter_android: 3.9.5
-  in_app_purchase_android: 0.3.0+13
-  path_provider_android: 2.1.0
+  webview_flutter_android: 2.10.4
   shared_preferences_android: 2.1.0
+  path_provider_android: 2.1.0
+  in_app_purchase_android: 0.3.0+13
 
 dev_dependencies:
   flutter_test:
@@ -84,6 +91,8 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/images/
+    - assets/app_icon.png
+    - assets/privacy_policy.html
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

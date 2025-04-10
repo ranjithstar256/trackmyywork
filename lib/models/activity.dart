@@ -49,7 +49,7 @@ class Activity {
       'name': name,
       'color': color,
       'icon': icon,
-      'isDefault': isDefault,
+      'isDefault': isDefault ? 1 : 0,
     };
   }
 
@@ -59,7 +59,7 @@ class Activity {
       name: json['name'],
       color: json['color'],
       icon: json['icon'],
-      isDefault: json['isDefault'] ?? false,
+      isDefault: json['isDefault'] == 1 || json['isDefault'] == true,
     );
   }
 }

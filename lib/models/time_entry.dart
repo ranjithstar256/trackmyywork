@@ -55,20 +55,20 @@ class TimeEntry {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'activityId': activityId,
-      'startTime': startTime.toIso8601String(),
-      'endTime': endTime?.toIso8601String(),
-      'note': note,
+      'activity_id': activityId,
+      'start_time': startTime.toIso8601String(),
+      'end_time': endTime?.toIso8601String(),
+      'notes': note,
     };
   }
 
   factory TimeEntry.fromJson(Map<String, dynamic> json) {
     return TimeEntry(
       id: json['id'],
-      activityId: json['activityId'],
-      startTime: DateTime.parse(json['startTime']),
-      endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
-      note: json['note'],
+      activityId: json['activity_id'],
+      startTime: DateTime.parse(json['start_time']),
+      endTime: json['end_time'] != null ? DateTime.parse(json['end_time']) : null,
+      note: json['notes'],
     );
   }
 }

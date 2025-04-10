@@ -1,10 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/theme_service.dart';
 import '../services/subscription_service.dart';
 import '../services/time_tracking_service.dart';
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'privacy_policy_screen.dart';
+import 'test_data_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -73,15 +78,30 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           
+          // Test Data Generator
+          ListTile(
+            title: const Text('Test Data Generator'),
+            subtitle: const Text('Generate test data for reports'),
+            leading: const Icon(Icons.science),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TestDataScreen(),
+                ),
+              );
+            },
+          ),
+          
           const Divider(),
           
-     /*     // About
+          // About
           _buildSectionHeader(context, 'About'),
           
           // App info
           ListTile(
             title: const Text('App Version'),
-            subtitle: const Text('1.0.0'),
+            subtitle: const Text('1.0.1'),
             leading: const Icon(Icons.info),
           ),
           
@@ -90,7 +110,12 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Privacy Policy'),
             leading: const Icon(Icons.privacy_tip),
             onTap: () {
-              // Show privacy policy
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PrivacyPolicyScreen(),
+                ),
+              );
             },
           ),
           
@@ -99,9 +124,14 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Terms of Service'),
             leading: const Icon(Icons.description),
             onTap: () {
-              // Show terms of service
+              // Show terms of service (to be implemented)
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Terms of Service coming soon'),
+                ),
+              );
             },
-          ),*/
+          ),
         ],
       ),
     );
@@ -336,58 +366,162 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _exportData(BuildContext context) {
-    // Get the time tracking service
-    final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+  void _exportData(BuildContext context) async {
+    // Show loading indicator
+    final loadingDialog = _showLoadingDialog(context, 'Preparing data export...');
     
-    // Create a JSON object with all the user's data
-    final Map<String, dynamic> exportData = {
-      'activities': timeTrackingService.activities.map((a) => a.toJson()).toList(),
-      'timeEntries': timeTrackingService.timeEntries.map((e) => e.toJson()).toList(),
-      'exportDate': DateTime.now().toIso8601String(),
-      'appVersion': '1.0.0',
-    };
-    
-    // Convert to pretty JSON string (for display purposes)
-    final jsonString = const JsonEncoder.withIndent('  ').convert(exportData);
-    
-    // In a real app, this would save the file to the device
-    // For now, we'll just show a success message with a preview
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Data Exported'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 48),
-            const SizedBox(height: 16),
-            const Text(
-              'Your data has been exported successfully.',
-              textAlign: TextAlign.center,
+    try {
+      // Get the time tracking service
+      final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+      
+      // Create a JSON object with all the user's data
+      final Map<String, dynamic> exportData = {
+        'activities': timeTrackingService.activities.map((a) => a.toJson()).toList(),
+        'timeEntries': timeTrackingService.timeEntries.map((e) => e.toJson()).toList(),
+        'exportDate': DateTime.now().toIso8601String(),
+        'appVersion': '1.0.1',
+      };
+      
+      // Convert to pretty JSON string
+      final jsonString = const JsonEncoder.withIndent('  ').convert(exportData);
+      
+      // Get the app's documents directory
+      final directory = await getApplicationDocumentsDirectory();
+      final now = DateTime.now();
+      final formattedDate = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final fileName = 'trackmywork_export_$formattedDate.json';
+      final filePath = '${directory.path}/$fileName';
+      
+      // Write the JSON data to a file
+      final file = File(filePath);
+      await file.writeAsString(jsonString);
+      
+      // Close loading dialog
+      Navigator.of(context).pop();
+      
+      // Show success dialog with share option
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Data Exported'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'Your data has been exported successfully.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Total Activities: ${timeTrackingService.activities.length}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                'Total Time Entries: ${timeTrackingService.timeEntries.length}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Export Location:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(filePath),
+              const SizedBox(height: 8),
+              const Text(
+                'Note: The file is saved in your app\'s documents directory. Use the Share button below to save it to a more accessible location or send it via email.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Close'),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Total Activities: ${timeTrackingService.activities.length}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Total Time Entries: ${timeTrackingService.timeEntries.length}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.share),
+              label: const Text('Share'),
+              onPressed: () async {
+                Navigator.pop(context);
+                // Share the file
+                final result = await Share.shareXFiles(
+                  [XFile(filePath)],
+                  text: 'TrackMyWork Data Export',
+                );
+                
+                if (result.status == ShareResultStatus.dismissed) {
+                  // Show a hint if user dismissed the share dialog
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('You can access this file later from Settings > Data Management'),
+                    ),
+                  );
+                }
+              },
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
+      );
+    } catch (e) {
+      // Close loading dialog
+      Navigator.of(context).pop();
+      
+      // Show error dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Export Failed'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'There was an error exporting your data.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Error: $e',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+  
+  Widget _showLoadingDialog(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 16),
+            Text(message),
+          ],
+        ),
       ),
     );
+    
+    // Return a placeholder widget (the dialog is shown by showDialog)
+    return const SizedBox.shrink();
   }
 
   void _showClearDataConfirmation(BuildContext context) {

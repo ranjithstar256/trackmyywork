@@ -307,6 +307,35 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:846264121883:android:a7c5e3f4b2d6c4e21996be",
+        "android_client_info": {
+          "package_name": "tm.ranjith.trackmywork"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "846264121883-f9smf378ohuujgh47i4c7mkn5d539n93.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHgCLTwmEQWOPGbdmLMTXZPTFhTptM9Lc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "846264121883-f9smf378ohuujgh47i4c7mkn5d539n93.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

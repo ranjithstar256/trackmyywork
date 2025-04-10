@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:trackmywork/services/time_tracking_service.dart';
 import '../main.dart';
 import 'notification_service.dart';
 
@@ -29,7 +32,7 @@ class BackgroundService {
   String? _lastNotificationBody;
   DateTime _lastNotificationUpdateTime = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // Minimum time between notification updates (in seconds)
+  // Minimum time between notimm,fication updates (in seconds)
   static const int minUpdateIntervalSeconds = 5;
 
   // Stream controllers for UI and notification updates
@@ -221,6 +224,18 @@ class BackgroundService {
     await prefs.remove('activeActivityName');
     await prefs.remove('activeActivityIcon');
     await prefs.remove('startTime');
+
+    // Close stream controllers
+    await _uiUpdateController.close();
+    await _notificationUpdateController.close();
+
+    // update ui to timer stopped
+    _uiUpdateController.add(Duration.zero);
+    _notificationUpdateController.add(Duration.zero);
+
+    debugPrint('Timer stopped');
+    final timeTrackingService = Provider.of<TimeTrackingService>(navigatorKey.currentContext!, listen: false);
+
   }
 
   void _updateElapsedTime() {

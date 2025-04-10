@@ -91,7 +91,7 @@ class _TimerDisplayState extends State<TimerDisplay> {
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
-            value: (widget.elapsed.inSeconds % 60) / 60,
+            value: (widget.elapsed.inSeconds % 60) / 60.0 < 0 ? 0.0 : (widget.elapsed.inSeconds % 60) / 60.0,
             backgroundColor: Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.1),
             valueColor: AlwaysStoppedAnimation<Color>(
               Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.5),

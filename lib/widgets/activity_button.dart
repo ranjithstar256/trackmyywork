@@ -22,28 +22,28 @@ class ActivityButton extends StatefulWidget {
 }
 
 class _ActivityButtonState extends State<ActivityButton> {
-  Timer? _updateTimer;
+  StreamSubscription? _updateSubscription;
   
   @override
   void initState() {
     super.initState();
-    // Set up a timer to refresh the widget every second if it's the active activity
-    _setupUpdateTimer();
+    // Listen to centralized updates instead of using a timer
+    _setupUpdateListener();
   }
   
   @override
   void dispose() {
-    _updateTimer?.cancel();
+    _updateSubscription?.cancel();
     super.dispose();
   }
   
-  void _setupUpdateTimer() {
-    // Cancel any existing timer
-    _updateTimer?.cancel();
+  void _setupUpdateListener() {
+    // Cancel any existing subscription
+    _updateSubscription?.cancel();
     
-    // Create a new timer that updates every second
-    _updateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+    // Listen to the centralized update stream from TimeTrackingService
+    final timeTrackingService = Provider.of<TimeTrackingService>(context, listen: false);
+    _updateSubscription = timeTrackingService.activityUpdateStream.listen((_) {
       final isActive = timeTrackingService.isTracking && 
                       timeTrackingService.currentActivityId == widget.activity.id;
       

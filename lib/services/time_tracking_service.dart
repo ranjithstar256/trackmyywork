@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -7,30 +8,41 @@ import '../models/activity.dart';
 import '../models/time_entry.dart';
 import 'background_service.dart';
 import 'notification_service.dart';
+import 'database_helper.dart';
 
 class TimeTrackingService extends ChangeNotifier {
-  late SharedPreferences _prefs;
+  // Keys for SharedPreferences (only used for current activity state)
+  static const String _currentActivityIdKey = 'current_activity_id';
+  static const String _isTrackingKey = 'is_tracking';
 
+  // Database helper
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  
+  // SharedPreferences for tracking state only
+  late SharedPreferences _prefs;
+  
+  // In-memory cache of data
   List<Activity> _activities = [];
   List<TimeEntry> _timeEntries = [];
-
   String? _currentActivityId;
-  //final NotificationService _notificationService = NotificationService();
-
-  List<Activity> get activities => _activities;
-  List<TimeEntry> get timeEntries => _timeEntries;
-  String? get currentActivityId => _currentActivityId;
-
-  bool get isTracking => _currentActivityId != null;
-
-  // Track the last time we calculated duration to prevent too frequent updates
-  DateTime _lastDurationCalculation = DateTime.now();
-  Duration _cachedCurrentDuration = Duration.zero;
+  bool _isTracking = false;
 
   // Fields for caching duration calculations
+  DateTime _lastDurationCalculation = DateTime.now();
+  Duration _cachedCurrentDuration = Duration.zero;
+  
+  // Fields for caching getActivityDurationsForDay
   DateTime _lastDurationByDayCalculationTime = DateTime(2000);
   DateTime? _lastDurationByDayDate;
   Map<String, Duration>? _cachedDurationsByDay;
+  
+  // Centralized update stream
+  final StreamController<void> _activityUpdateController = StreamController.broadcast();
+  Stream<void> get activityUpdateStream => _activityUpdateController.stream;
+  Timer? _updateTimer;
+  
+  // Update frequency in seconds (adjust as needed for battery optimization)
+  static const int _updateFrequencySeconds = 5;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -38,18 +50,16 @@ class TimeTrackingService extends ChangeNotifier {
     // Initialize background service
     await BackgroundService.initializeService();
 
-    // Load activities
-    final activitiesJson = _prefs.getStringList('activities') ?? [];
-    _activities = activitiesJson
-        .map((json) => Activity.fromJson(jsonDecode(json)))
-        .toList();
+    // Load activities from database
+    _activities = await _dbHelper.getActivities(includeArchived: true);
 
-    // Load time entries
-    final timeEntriesJson = _prefs.getStringList('timeEntries') ?? [];
-    _timeEntries = timeEntriesJson
-        .map((json) => TimeEntry.fromJson(jsonDecode(json)))
-        .toList();
+    // Load time entries from database
+    _timeEntries = await _dbHelper.getAllTimeEntries();
 
+    // Load current activity state from SharedPreferences (still using SharedPreferences for this)
+    _currentActivityId = _prefs.getString(_currentActivityIdKey);
+    _isTracking = _prefs.getBool(_isTrackingKey) ?? false;
+    
     // Create default activities if none exist
     if (_activities.isEmpty) {
       await _createDefaultActivities();
@@ -57,7 +67,40 @@ class TimeTrackingService extends ChangeNotifier {
 
     // Check for any active time entries from background service
     await _checkForActiveTimeEntries();
+    
+    // Start the centralized update timer if tracking is active
+    _setupUpdateTimer();
+
+    notifyListeners();
   }
+  
+  void _setupUpdateTimer() {
+    // Cancel any existing timer
+    _updateTimer?.cancel();
+    
+    // Only start the timer if we're tracking an activity
+    if (_isTracking && _currentActivityId != null) {
+      // Create a timer that updates at the specified frequency
+      _updateTimer = Timer.periodic(Duration(seconds: _updateFrequencySeconds), (_) {
+        // Notify all listeners that the time has updated
+        _activityUpdateController.add(null);
+        debugPrint('TimeTrackingService: Broadcasting time update to all listeners');
+      });
+      debugPrint('TimeTrackingService: Started update timer with frequency $_updateFrequencySeconds seconds');
+    }
+  }
+  
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    _activityUpdateController.close();
+    super.dispose();
+  }
+
+  List<Activity> get activities => _activities;
+  List<TimeEntry> get timeEntries => _timeEntries;
+  String? get currentActivityId => _currentActivityId;
+  bool get isTracking => _isTracking;
 
   Future<void> _createDefaultActivities() async {
     final workActivity = Activity(
@@ -79,26 +122,27 @@ class TimeTrackingService extends ChangeNotifier {
     _activities.add(workActivity);
     _activities.add(breakActivity);
 
-    await _saveActivities();
+    // Save to database
+    await _dbHelper.insertActivities(_activities);
   }
 
+  // Save activities to database
   Future<void> _saveActivities() async {
-    final activitiesJson =
-        _activities.map((activity) => jsonEncode(activity.toJson())).toList();
-
-    await _prefs.setStringList('activities', activitiesJson);
+    // Clear and reinsert all activities
+    for (final activity in _activities) {
+      await _dbHelper.updateActivity(activity);
+    }
   }
 
+  // Save time entries to database
   Future<void> _saveTimeEntries() async {
-    final timeEntriesJson =
-        _timeEntries.map((entry) => jsonEncode(entry.toJson())).toList();
-
-    await _prefs.setStringList('timeEntries', timeEntriesJson);
+    // We don't need to save all entries each time
+    // The database operations handle individual entries
   }
 
+  // This method is kept for backward compatibility but does nothing
   Future<void> _saveData() async {
-    await _saveActivities();
-    await _saveTimeEntries();
+    // No need to do anything as database operations are performed immediately
   }
 
   Future<void> _checkForActiveTimeEntries() async {
@@ -115,16 +159,12 @@ class TimeTrackingService extends ChangeNotifier {
     debugPrint('Found active activity in background service: $activityId');
 
     // Check if we already have an active time entry for this activity
-    final activeEntries = _timeEntries
-        .where(
-            (entry) => entry.activityId == activityId && entry.endTime == null)
-        .toList();
-
-    if (activeEntries.isEmpty) {
+    final ongoingEntry = await _dbHelper.getOngoingTimeEntry();
+    
+    if (ongoingEntry == null) {
       debugPrint('Creating new time entry for active activity: $activityId');
       // Create a new time entry for the active activity
-      final startTime =
-          DateTime.now().subtract(activeDetails['elapsed'] as Duration);
+      final startTime = DateTime.now().subtract(activeDetails['elapsed'] as Duration);
 
       final newTimeEntry = TimeEntry(
         id: const Uuid().v4(),
@@ -133,6 +173,7 @@ class TimeTrackingService extends ChangeNotifier {
         endTime: null,
       );
 
+      await _dbHelper.insertTimeEntry(newTimeEntry);
       _timeEntries.add(newTimeEntry);
       _currentActivityId = activityId;
       notifyListeners();
@@ -140,16 +181,20 @@ class TimeTrackingService extends ChangeNotifier {
     }
 
     // If there's an active entry, set it as the current activity
-    debugPrint('Found existing time entry for active activity: $activityId');
-    _currentActivityId = activeEntries.first.activityId;
+    debugPrint('Found existing time entry for active activity: ${ongoingEntry.activityId}');
+    _currentActivityId = ongoingEntry.activityId;
     notifyListeners();
   }
 
   Future<void> startActivity(String activityId) async {
     debugPrint('Starting activity: $activityId');
 
-    // If there's already an active activity, stop it first
-    if (_currentActivityId != null) {
+    if (_isTracking && _currentActivityId == activityId) {
+      return; // Already tracking this activity
+    }
+
+    // Stop current activity if any
+    if (_isTracking) {
       await stopCurrentActivity();
     }
 
@@ -164,78 +209,107 @@ class TimeTrackingService extends ChangeNotifier {
       ),
     );
 
-    // Create a new time entry
+    final now = DateTime.now();
     final timeEntry = TimeEntry(
       id: const Uuid().v4(),
       activityId: activityId,
-      startTime: DateTime.now(),
+      startTime: now,
       endTime: null,
     );
 
-    // Add the time entry to the list
+    // Save to database
+    await _dbHelper.insertTimeEntry(timeEntry);
+    
+    // Update in-memory cache
     _timeEntries.add(timeEntry);
-
-    // Set the current activity
+    
+    // Refresh time entries from database to ensure consistency
+    await refreshTimeEntries();
+    
     _currentActivityId = activityId;
+    _isTracking = true;
+    _lastDurationCalculation = now;
+    _cachedCurrentDuration = Duration.zero;
 
     // Start the background service timer
-    await BackgroundService()
-        .startTimer(activityId, activity.name, activity.icon);
+    await BackgroundService().startTimer(activityId, activity.name, activity.icon);
 
-    // Save the data
-    await _saveData();
+    // Save tracking state to SharedPreferences
+    await _prefs.setString(_currentActivityIdKey, activityId);
+    await _prefs.setBool(_isTrackingKey, true);
+    
+    // Start the update timer when an activity is started
+    _setupUpdateTimer();
 
-    // Notify listeners
     notifyListeners();
   }
 
   Future<void> stopCurrentActivity() async {
-    if (_currentActivityId == null) {
+    if (!_isTracking || _currentActivityId == null) {
       debugPrint('No active activity to stop');
       return;
     }
 
     debugPrint('Stopping current activity: $_currentActivityId');
 
-    // Find the active time entry
-    final activeTimeEntry = _timeEntries.firstWhere(
-      (entry) =>
-          entry.activityId == _currentActivityId && entry.endTime == null,
-      orElse: () => TimeEntry(
+    final now = DateTime.now();
+    
+    // Find the ongoing time entry in the database
+    final currentEntry = await _dbHelper.getOngoingTimeEntry();
+    
+    if (currentEntry == null) {
+      debugPrint('No active time entry found in database');
+      
+      // Create a new entry as fallback
+      final newEntry = TimeEntry(
         id: const Uuid().v4(),
         activityId: _currentActivityId!,
-        startTime: DateTime.now().subtract(const Duration(minutes: 1)),
-        endTime: null,
-      ),
-    );
-
-    // Update the end time
-    final updatedEntry = TimeEntry(
-      id: activeTimeEntry.id,
-      activityId: activeTimeEntry.activityId,
-      startTime: activeTimeEntry.startTime,
-      endTime: DateTime.now(),
-    );
-
-    // Replace the entry in the list
-    final index =
-        _timeEntries.indexWhere((entry) => entry.id == activeTimeEntry.id);
-    if (index >= 0) {
-      _timeEntries[index] = updatedEntry;
+        startTime: now.subtract(const Duration(minutes: 1)),
+        endTime: now,
+      );
+      
+      await _dbHelper.insertTimeEntry(newEntry);
+      
+      // Update in-memory cache
+      _timeEntries.add(newEntry);
     } else {
-      _timeEntries.add(updatedEntry);
+      // Update the entry with end time
+      final updatedEntry = TimeEntry(
+        id: currentEntry.id,
+        activityId: currentEntry.activityId,
+        startTime: currentEntry.startTime,
+        endTime: now,
+      );
+      
+      // Update in database
+      await _dbHelper.updateTimeEntry(updatedEntry);
+      
+      // Update in-memory cache
+      final index = _timeEntries.indexWhere((entry) => entry.id == currentEntry.id);
+      if (index >= 0) {
+        _timeEntries[index] = updatedEntry;
+      } else {
+        _timeEntries.add(updatedEntry);
+      }
     }
+    
+    // Refresh time entries from database to ensure consistency
+    await refreshTimeEntries();
 
-    // Clear the current activity
+    _isTracking = false;
     _currentActivityId = null;
 
     // Stop the background service timer
     await BackgroundService().stopTimer();
 
-    // Save the data
-    await _saveData();
+    // Update SharedPreferences
+    await _prefs.remove(_currentActivityIdKey);
+    await _prefs.setBool(_isTrackingKey, false);
+    
+    // Stop the update timer when activity is stopped
+    _updateTimer?.cancel();
+    _updateTimer = null;
 
-    // Notify listeners
     notifyListeners();
   }
 
@@ -247,8 +321,12 @@ class TimeTrackingService extends ChangeNotifier {
       icon: icon,
     );
 
+    // Save to database
+    await _dbHelper.insertActivity(newActivity);
+    
+    // Update in-memory cache
     _activities.add(newActivity);
-    await _saveActivities();
+    
     notifyListeners();
   }
 
@@ -258,15 +336,20 @@ class TimeTrackingService extends ChangeNotifier {
     if (index != -1) {
       // Create a new activity with updated values but preserve isDefault status
       final isDefault = _activities[index].isDefault;
-      _activities[index] = Activity(
+      final updatedActivity = Activity(
         id: activityId,
         name: name,
         color: color,
         icon: icon,
         isDefault: isDefault,
       );
-
-      await _saveActivities();
+      
+      // Update in database
+      await _dbHelper.updateActivity(updatedActivity);
+      
+      // Update in-memory cache
+      _activities[index] = updatedActivity;
+      
       notifyListeners();
     }
   }
@@ -275,8 +358,12 @@ class TimeTrackingService extends ChangeNotifier {
     final index = _activities.indexWhere((a) => a.id == activity.id);
 
     if (index != -1) {
+      // Update in database
+      await _dbHelper.updateActivity(activity);
+      
+      // Update in-memory cache
       _activities[index] = activity;
-      await _saveActivities();
+      
       notifyListeners();
     }
   }
@@ -309,39 +396,59 @@ class TimeTrackingService extends ChangeNotifier {
       };
     }
 
-    // Remove the activity
+    // Delete from database
+    await _dbHelper.deleteActivity(activityId);
+    
+    // Update in-memory cache
     _activities.removeWhere((a) => a.id == activityId);
-
-    // Also remove all time entries associated with this activity
     _timeEntries.removeWhere((entry) => entry.activityId == activityId);
 
-    await _saveActivities();
-    await _saveTimeEntries();
     notifyListeners();
 
     return {'success': true, 'message': 'Activity deleted successfully'};
   }
 
   List<TimeEntry> getTimeEntriesForDay(DateTime date) {
+    // Use the in-memory cache but also check for any active entries
     final startOfDay = DateTime(date.year, date.month, date.day);
     final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
-
-    return _timeEntries
+    
+    // Debug logging
+    debugPrint('Getting time entries for day: ${date.toString().split(' ')[0]}');
+    debugPrint('Total entries in memory: ${_timeEntries.length}');
+    
+    // Filter entries for the specified day
+    final entriesForDay = _timeEntries
         .where((entry) =>
-            entry.startTime.isAfter(startOfDay) &&
-            (entry.endTime?.isBefore(endOfDay) ?? false))
+            (entry.startTime.isAfter(startOfDay) || entry.startTime.isAtSameMomentAs(startOfDay)) &&
+            (entry.endTime == null || entry.endTime!.isBefore(endOfDay) || entry.endTime!.isAtSameMomentAs(endOfDay)))
         .toList();
+    
+    debugPrint('Found ${entriesForDay.length} entries for ${date.toString().split(' ')[0]} in memory');
+    return entriesForDay;
+  }
+
+  Future<List<TimeEntry>> getTimeEntriesForDayFromDb(DateTime date) async {
+    // Direct database query for better performance
+    return await _dbHelper.getTimeEntriesForDay(date);
   }
 
   List<TimeEntry> getTimeEntriesForDateRange(DateTime start, DateTime end) {
+    // This could be optimized to query directly from the database
+    // but for now we'll keep the same API and use the in-memory cache
     final startOfRange = DateTime(start.year, start.month, start.day);
     final endOfRange = DateTime(end.year, end.month, end.day, 23, 59, 59);
 
     return _timeEntries
         .where((entry) =>
-            entry.startTime.isAfter(startOfRange) &&
-            (entry.endTime?.isBefore(endOfRange) ?? false))
+            (entry.startTime.isAfter(startOfRange) || entry.startTime.isAtSameMomentAs(startOfRange)) &&
+            (entry.endTime == null || entry.endTime!.isBefore(endOfRange) || entry.endTime!.isAtSameMomentAs(endOfRange)))
         .toList();
+  }
+
+  Future<List<TimeEntry>> getTimeEntriesForDateRangeFromDb(DateTime start, DateTime end) async {
+    // Direct database query for better performance
+    return await _dbHelper.getTimeEntriesForDateRange(start, end);
   }
 
   Map<String, Duration> getActivityDurationsForDay(DateTime date) {
@@ -508,13 +615,123 @@ class TimeTrackingService extends ChangeNotifier {
       await stopCurrentActivity();
     }
 
-    // Clear only time entries, keep activities
-    _timeEntries = [];
-
-    // Save empty time entries list to SharedPreferences
-    await _saveTimeEntries();
+    // Clear time entries from database
+    await _dbHelper.deleteAllTimeEntries();
+    
+    // Clear in-memory cache
+    _timeEntries.clear();
 
     // Notify listeners that data has changed
+    notifyListeners();
+  }
+
+  /// Add a test time entry with specific start and end times
+  /// This method is for testing purposes only
+  Future<void> addTestTimeEntry({
+    required String activityId,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    // Validate that the activity exists
+    final activityExists = _activities.any((activity) => activity.id == activityId);
+    if (!activityExists) {
+      debugPrint('Cannot add test entry: Activity with ID $activityId does not exist');
+      return;
+    }
+    
+    // Validate that end time is after start time
+    if (endTime.isBefore(startTime)) {
+      debugPrint('Cannot add test entry: End time must be after start time');
+      return;
+    }
+    
+    // Create and add the time entry
+    final timeEntry = TimeEntry(
+      id: const Uuid().v4(),
+      activityId: activityId,
+      startTime: startTime,
+      endTime: endTime,
+    );
+    
+    // Save to database
+    await _dbHelper.insertTimeEntry(timeEntry);
+    
+    // Update in-memory cache
+    _timeEntries.add(timeEntry);
+    
+    // No need to notify listeners as this is for test data generation
+  }
+  
+  // Refresh the in-memory cache from the database
+  Future<void> refreshFromDatabase() async {
+    _activities = await _dbHelper.getActivities(includeArchived: true);
+    _timeEntries = await _dbHelper.getAllTimeEntries();
+    notifyListeners();
+  }
+
+  // This method should be called after any database operations to ensure the in-memory cache is up to date
+  Future<void> refreshTimeEntries() async {
+    _timeEntries = await _dbHelper.getAllTimeEntries();
+    debugPrint('Refreshed time entries from database. Total entries: ${_timeEntries.length}');
+    notifyListeners();
+  }
+
+  Future<void> loadData() async {
+    debugPrint('Loading data from database...');
+    
+    // Load activities and time entries from database
+    _activities = await _dbHelper.getAllActivities();
+    _timeEntries = await _dbHelper.getAllTimeEntries();
+    
+    debugPrint('Loaded ${_activities.length} activities and ${_timeEntries.length} time entries');
+    
+    // Check if there's an ongoing time entry
+    final ongoingEntry = await _dbHelper.getOngoingTimeEntry();
+    if (ongoingEntry != null) {
+      debugPrint('Found ongoing time entry: ${ongoingEntry.id} for activity ${ongoingEntry.activityId}');
+      
+      _currentActivityId = ongoingEntry.activityId;
+      _isTracking = true;
+      _lastDurationCalculation = DateTime.now();
+      _cachedCurrentDuration = _lastDurationCalculation.difference(ongoingEntry.startTime);
+      
+      // Start the update timer
+      _setupUpdateTimer();
+      
+      // Update SharedPreferences to match database state
+      await _prefs.setString(_currentActivityIdKey, ongoingEntry.activityId);
+      await _prefs.setBool(_isTrackingKey, true);
+      
+      // Start the background service timer
+      final activity = activities.firstWhere(
+        (a) => a.id == ongoingEntry.activityId,
+        orElse: () => Activity(
+          id: ongoingEntry.activityId,
+          name: 'Unknown Activity',
+          color: '0xFF4CAF50',
+          icon: 'work',
+        ),
+      );
+      
+      await BackgroundService().startTimer(
+        ongoingEntry.activityId, 
+        activity.name, 
+        activity.icon
+      );
+    } else {
+      debugPrint('No ongoing time entry found');
+      
+      // Clear tracking state
+      _currentActivityId = null;
+      _isTracking = false;
+      _lastDurationCalculation = DateTime.now();
+      _cachedCurrentDuration = Duration.zero;
+      
+      // Update SharedPreferences
+      await _prefs.remove(_currentActivityIdKey);
+      await _prefs.setBool(_isTrackingKey, false);
+    }
+    
     notifyListeners();
   }
 }

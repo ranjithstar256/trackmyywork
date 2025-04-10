@@ -10,6 +10,7 @@ import '../widgets/timer_display.dart';
 import '../widgets/active_activity_banner.dart';
 import '../models/activity.dart';
 import '../models/time_entry.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -249,60 +250,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Create a new overlay
     _overlayEntry = OverlayEntry(
       builder: (context) {
-        return Positioned.fill(
-          child: Material(
-            color: Colors.black.withOpacity(0.5),
-            child: Stack(
-              children: [
-                Positioned(
-                  bottom: 120,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 16),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 10,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.touch_app,
-                            size: 32,
-                            color: Colors.blue,
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Tip: Long press an activity to edit or delete',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+        return GestureDetector(
+          onTap: _removeOverlay,
+          onHorizontalDragEnd: (_) => _removeOverlay(),
+          behavior: HitTestBehavior.opaque,
+          child: Positioned.fill(
+            child: Material(
+              color: Colors.black.withOpacity(0.5),
+              child: Stack(
+                children: [
+                  Positioned(
+                    bottom: 120,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Tap anywhere to dismiss',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey,
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.touch_app,
+                              size: 32,
+                              color: Colors.blue,
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Tip: Long press an activity to edit or delete',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Tap anywhere or swipe to dismiss',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -311,13 +317,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     // Insert the overlay
     Overlay.of(context).insert(_overlayEntry!);
-
-    // Add a tap handler to remove the overlay when tapped
-    GestureDetector(
-      onTap: _removeOverlay,
-      behavior: HitTestBehavior.opaque,
-      child: Container(),
-    );
   }
 
   void _removeOverlay() {
@@ -327,6 +326,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _formatDuration(Duration duration) {
     return BackgroundService().formatDuration(duration);
+  }
+
+  void _maybeShowLongPressHint() async {
+    // Check if we should show the hint and if the user has completed the intro
+    if (_showLongPressHint) {
+      // Check if user has seen the intro screen
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeenIntro = prefs.getBool('hasSeenIntro') ?? false;
+      
+      // Only show hint if user has seen the intro
+      if (hasSeenIntro) {
+        // Wait for the UI to be fully built
+        await Future.delayed(const Duration(seconds: 2));
+        _showHintOverlay();
+
+        // Auto-dismiss after some time
+        Future.delayed(const Duration(seconds: 3), () {
+          _removeOverlay();
+        });
+      }
+    }
   }
 
   @override
@@ -765,19 +785,5 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
-  }
-
-  void _maybeShowLongPressHint() async {
-    // Check if we should show the hint (could be stored in preferences)
-    if (_showLongPressHint) {
-      // Wait for the UI to be fully built
-      await Future.delayed(const Duration(seconds: 2));
-      _showHintOverlay();
-
-      // Auto-dismiss after some time
-      Future.delayed(const Duration(seconds: 3), () {
-        _removeOverlay();
-      });
-    }
   }
 }
